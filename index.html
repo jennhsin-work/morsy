@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morsy</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Menu bar -->
+    <header id="menubar">
+      <div class="brand">Mor<span>sy</span></div>
+      <nav id="menus">
+        <div class="menu"><button>File</button><div class="dropdown">
+          <button data-cmd="new">New Scene <kbd>⌘N</kbd></button>
+          <button data-cmd="export">Export OBJ…</button>
+          <button data-cmd="import-image">Set Image Reference…</button>
+        </div></div>
+        <div class="menu"><button>Edit</button><div class="dropdown">
+          <button data-cmd="undo">Undo <kbd>⌘Z</kbd></button>
+          <button data-cmd="redo">Redo <kbd>⇧⌘Z</kbd></button>
+          <hr><button data-cmd="duplicate">Duplicate <kbd>⌘D</kbd></button>
+          <button data-cmd="delete">Delete <kbd>⌫</kbd></button>
+          <button data-cmd="select-all">Select All <kbd>⌘A</kbd></button>
+        </div></div>
+        <div class="menu"><button>Create</button><div class="dropdown" id="create-menu"></div></div>
+        <div class="menu"><button>Modify</button><div class="dropdown">
+          <button data-cmd="center-pivot">Center on Ground</button>
+          <button data-cmd="freeze">Freeze Transformations</button>
+          <hr><button data-cmd="optimize-sel">Optimize Selected</button>
+          <button data-cmd="optimize">Optimize All</button>
+        </div></div>
+        <div class="menu"><button>Display</button><div class="dropdown">
+          <button data-cmd="shade-wire">Wireframe <kbd>4</kbd></button>
+          <button data-cmd="shade-smooth">Smooth Shade All <kbd>5</kbd></button>
+          <button data-cmd="shade-uv">UV Stress <kbd>6</kbd></button>
+          <hr><button data-cmd="toggle-grid">Toggle Grid <kbd>G</kbd></button>
+          <button data-cmd="frame-all">Frame All <kbd>A</kbd></button>
+          <button data-cmd="frame-sel">Frame Selected <kbd>F</kbd></button>
+        </div></div>
+        <div class="menu"><button>Windows</button><div class="dropdown">
+          <button data-cmd="dock-channel">Channel Box</button>
+          <button data-cmd="dock-attr">Attribute Editor</button>
+          <button data-cmd="dock-agents">AI</button>
+          <hr><button data-cmd="dock-dev">Developer (agent internals)</button>
+        </div></div>
+        <div class="menu"><button>Help</button><div class="dropdown">
+          <button data-cmd="help">Hotkeys…</button>
+        </div></div>
+      </nav>
+      <div id="status-line">
+        <select id="mode-select" title="Workspace"><option>Modeling</option><option>AI</option></select>
+        <span class="sep"></span>
+        <label class="snap" title="What a click selects">pick <select id="select-mode"><option value="component">Component</option><option value="part">Part</option></select></label>
+        <span class="sep"></span>
+        <label class="snap" title="Snap to grid (X)"><input type="checkbox" id="snap-grid"> ⊞</label>
+        <span class="sep"></span>
+        <span id="backend-status" class="pill" title="AI backend status">●</span>
+      </div>
+    </header>
+
+    <!-- Shelf -->
+    <div id="shelf">
+      <div class="shelf-tabs">
+        <button class="active" data-shelf="polygons">Polygons</button>
+        <button data-shelf="deform">Deform</button>
+        <button data-shelf="ai">AI</button>
+      </div>
+      <div class="shelf-row" id="shelf-row"></div>
+    </div>
+
+    <!-- Toolbox -->
+    <aside id="toolbox">
+      <button data-tool="select" class="active" title="Select Tool (Q)"><i class="ico ico-select"></i></button>
+      <button data-tool="translate" title="Move Tool (W)"><i class="ico ico-move"></i></button>
+      <button data-tool="rotate" title="Rotate Tool (E)"><i class="ico ico-rotate"></i></button>
+      <button data-tool="scale" title="Scale Tool (R)"><i class="ico ico-scale"></i></button>
+      <span class="tb-sep"></span>
+      <button data-cmd="frame-all" title="Frame All (A)"><i class="ico ico-frame"></i></button>
+      <span class="tb-sep"></span>
+      <button data-layout="single" class="active" title="Single pane layout">▣</button>
+      <button data-layout="outliner" title="Outliner / Persp">◧</button>
+    </aside>
+
+    <!-- Outliner (left dock) -->
+    <aside id="outliner" class="dock">
+      <div class="dock-tabs"><button class="active">Outliner</button></div>
+      <div class="dock-body">
+        <input id="outliner-filter" placeholder="Search…" />
+        <ul id="outliner-list"></ul>
+      </div>
+    </aside>
+
+    <!-- Viewport -->
+    <main id="viewport">
+      <div id="panel-menu">
+        <button>View</button><button>Shading</button><button>Lighting</button><button>Show</button>
+        <span class="grow"></span>
+        <div class="panel-icons">
+          <button data-cmd="shade-wire" title="Wireframe (4)">◻</button>
+          <button data-cmd="shade-smooth" class="active" title="Smooth Shade (5)">◼</button>
+          <button data-cmd="shade-uv" title="UV Stress (6)">▦</button>
+          <button data-cmd="toggle-grid" class="active" title="Grid (G)">⊞</button>
+        </div>
+      </div>
+      <div id="hud-view">persp</div>
+      <div id="hud-stats"></div>
+      <div id="view-helper"></div>
+    </main>
+
+    <!-- Right dock -->
+    <aside id="right-dock" class="dock">
+      <div class="dock-tabs">
+        <button data-dock="channel" class="active">Channel Box</button>
+        <button data-dock="attr">Attribute Editor</button>
+        <button data-dock="agents">✦ AI <span id="ai-badge" class="badge"></span></button>
+        <button data-dock="dev" class="hidden">Developer</button>
+      </div>
+
+      <section class="dock-body" data-dock-panel="channel">
+        <div id="channel-box"><em class="muted">Nothing selected</em></div>
+      </section>
+
+      <section class="dock-body hidden" data-dock-panel="attr">
+        <div id="properties" class="props"><em class="muted">Nothing selected</em></div>
+      </section>
+
+      <!-- AI panel: prompt → model, Meshy-style -->
+      <section class="dock-body hidden ai-panel" data-dock-panel="agents">
+        <div class="ai-modes">
+          <button data-ai-mode="create" class="active">Text to 3D</button>
+          <button data-ai-mode="image">Image to 3D</button>
+          <button data-ai-mode="edit">Edit</button>
+        </div>
+        <form id="agent-form">
+          <label class="ai-image hidden" id="image-drop">
+            <input type="file" id="image-input" accept="image/*" hidden />
+            <img id="image-preview" alt="" hidden />
+            <span id="image-name">Click to choose a reference image</span>
+          </label>
+          <textarea id="prompt" rows="4" placeholder="Describe what to create… e.g. 'a low-poly wooden chair with a tall back'"></textarea>
+          <div class="ai-field"><span class="ai-label">Style</span>
+            <div class="chips" id="style-chips">
+              <button type="button" data-style="">Auto</button>
+              <button type="button" data-style="blocky">Low poly</button>
+              <button type="button" data-style="smooth">Smooth</button>
+              <button type="button" data-style="detailed">Detailed</button>
+            </div>
+          </div>
+          <div class="ai-field"><span class="ai-label">Detail</span>
+            <div class="chips" id="detail-chips">
+              <button type="button" data-tess="">Auto</button>
+              <button type="button" data-tess="low">Low</button>
+              <button type="button" data-tess="medium">Medium</button>
+              <button type="button" data-tess="high">High</button>
+            </div>
+          </div>
+          <button type="submit" id="btn-run" class="primary ai-generate">✦ Generate</button>
+        </form>
+
+        <div id="ai-progress" class="ai-progress hidden">
+          <div class="ai-progress-head"><span id="ai-progress-text">Planning…</span><span id="agent-count" class="muted"></span></div>
+          <div class="bar"><i id="ai-progress-bar"></i></div>
+          <ul id="agent-list" class="comp-chips"></ul>
+        </div>
+
+        <div id="transcript" class="transcript"></div>
+
+        <div id="ai-result" class="ai-result hidden">
+          <span id="ai-result-text"></span>
+          <span class="ai-rate">
+            <button id="btn-good" title="Good result">👍</button>
+            <button id="btn-bad" title="Bad result">👎</button>
+          </span>
+        </div>
+
+        <h4>History</h4>
+        <div id="history" class="history"><em class="muted">Generations appear here</em></div>
+      </section>
+
+      <!-- Developer panel: agent internals, hidden by default (Windows → Developer) -->
+      <section class="dock-body hidden" data-dock-panel="dev">
+        <h4>Optimizer report</h4>
+        <div id="opt-report" class="report"><em>No run yet</em></div>
+        <h4>Episode annotation → reward</h4>
+        <div class="row">
+          <button id="btn-dev-good" title="Label the episode a success">👍 Success</button>
+          <button id="btn-partial" title="Label the episode a partial success">◐ Partial</button>
+          <button id="btn-dev-bad" title="Label the episode a failure">👎 Failure</button>
+        </div>
+        <div id="trajectory-view" class="report"><em>No episode yet</em></div>
+        <div class="row">
+          <button id="btn-export-traj" title="Download every logged episode as JSONL">Export JSONL</button>
+          <button id="btn-replay" title="Re-execute the last episode and verify checkpoints">Verify replay</button>
+          <button id="btn-clear-traj" class="muted-btn">clear log</button>
+        </div>
+        <h4>RL policy</h4>
+        <div class="row"><button id="btn-reset-policy" class="muted-btn">reset policy</button></div>
+        <div id="policy-view" class="report"></div>
+        <h4>Log</h4>
+        <pre id="log"></pre>
+      </section>
+    </aside>
+
+    <!-- Command line + help line -->
+    <footer id="bottom">
+      <div id="cmdline">
+        <span class="cmd-label" id="cmd-label" title="Click to toggle AI / expression">AI</span>
+        <input id="cmd-input" placeholder="Type a modeling request and press Enter — e.g. 'a wooden stool with three legs'" />
+        <span id="cmd-result" class="muted"></span>
+      </div>
+      <div id="helpline">Select Tool: click to select, drag to orbit. Alt+LMB orbit · Alt+MMB pan · Alt+RMB / wheel zoom · F frame · 4/5/6 shading</div>
+    </footer>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

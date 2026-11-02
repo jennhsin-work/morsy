@@ -1,0 +1,22 @@
+{
+  "name": "morsy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI-native 3D modeling workspace: parallel modeling agents, geometry optimization engine, RL feedback loop.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js",
+    "server": "node --watch --env-file-if-exists=.env server/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "three": "^0.187.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  }
+}
