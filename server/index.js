@@ -92,7 +92,9 @@ const handlers = {
   async plan({ prompt, image, hints }) {
     const n = { coarse: "2-4", balanced: "4-7", fine: "7-12" }[hints?.decomposition] ?? "4-7";
     return structured(Plan, `Decompose this object into ${n} components that separate agents will model in parallel.
-Each component gets a world-space bounding region; regions should tile the object sensibly and not overlap much.
+A component is ONE physically distinct piece a person would name and could pick up or point at (a wheel, the fuel tank,
+the saddle, a handle) — never a bundle like "frame_tank_saddle_fender"; symmetric pairs (left/right wheel) are separate
+components. Each component gets a world-space bounding region; regions should tile the object sensibly and not overlap much.
 ${STYLE[hints?.style] ?? ""}
 Request: ${prompt}${image ? "\nAn image reference is attached; match its proportions and silhouette." : ""}`, image, { effort: "medium" });
   },

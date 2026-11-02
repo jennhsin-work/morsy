@@ -58,11 +58,19 @@ export class Orchestrator {
   spawn(name, role) { const a = { id: uid("agent"), name, role, state: "queued", detail: "", progress: 0, ms: 0 }; this.agents.push(a); this.emit(); return a; }
   set(a, patch) { Object.assign(a, patch); this.emit(); }
 
-  async call(path, body) {
-    const r = await fetch(`/api/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || `${path} failed (${r.status})`);
-    return j.data;
+  // One slow agent must not stall the whole run: each call has a hard timeout,
+  // after which the caller falls back to the offline modeler for that piece.
+  async call(path, body, timeoutMs = 150000) {
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(`/api/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ctrl.signal });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `${path} failed (${r.status})`);
+      return j.data;
+    } catch (err) {
+      if (err.name === "AbortError") throw new Error(`${path} timed out after ${Math.round(timeoutMs / 1000)} s`);
+      throw err;
+    } finally { clearTimeout(timer); }
   }
 
   // Entry point. Returns the episode record used for RL feedback.

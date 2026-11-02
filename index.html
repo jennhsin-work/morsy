@@ -14,6 +14,7 @@
       <nav id="menus">
         <div class="menu"><button>File</button><div class="dropdown">
           <button data-cmd="new">New Scene <kbd>⌘N</kbd></button>
+          <button data-cmd="export-glb">Export GLB (glTF)…</button>
           <button data-cmd="export">Export OBJ…</button>
           <button data-cmd="import-image">Set Image Reference…</button>
         </div></div>
@@ -23,6 +24,8 @@
           <hr><button data-cmd="duplicate">Duplicate <kbd>⌘D</kbd></button>
           <button data-cmd="delete">Delete <kbd>⌫</kbd></button>
           <button data-cmd="select-all">Select All <kbd>⌘A</kbd></button>
+          <hr><button data-cmd="group">Group <kbd>⌘G</kbd></button>
+          <button data-cmd="ungroup">Ungroup <kbd>⇧⌘G</kbd></button>
         </div></div>
         <div class="menu"><button>Create</button><div class="dropdown" id="create-menu"></div></div>
         <div class="menu"><button>Modify</button><div class="dropdown">
@@ -42,7 +45,7 @@
         <div class="menu"><button>Windows</button><div class="dropdown">
           <button data-cmd="dock-channel">Channel Box</button>
           <button data-cmd="dock-attr">Attribute Editor</button>
-          <button data-cmd="dock-agents">AI</button>
+          <button data-cmd="dock-agents">AI panel (focus prompt)</button>
           <hr><button data-cmd="dock-dev">Developer (agent internals)</button>
         </div></div>
         <div class="menu"><button>Help</button><div class="dropdown">
@@ -114,7 +117,6 @@
       <div class="dock-tabs">
         <button data-dock="channel" class="active">Channel Box</button>
         <button data-dock="attr">Attribute Editor</button>
-        <button data-dock="agents">✦ AI <span id="ai-badge" class="badge"></span></button>
         <button data-dock="dev" class="hidden">Developer</button>
       </div>
 
@@ -126,8 +128,34 @@
         <div id="properties" class="props"><em class="muted">Nothing selected</em></div>
       </section>
 
-      <!-- AI panel: prompt → model, Meshy-style -->
-      <section class="dock-body hidden ai-panel" data-dock-panel="agents">
+      <!-- Developer panel: agent internals, hidden by default (Windows → Developer) -->
+      <section class="dock-body hidden" data-dock-panel="dev">
+        <h4>Optimizer report</h4>
+        <div id="opt-report" class="report"><em>No run yet</em></div>
+        <h4>Episode annotation → reward</h4>
+        <div class="row">
+          <button id="btn-dev-good" title="Label the episode a success">👍 Success</button>
+          <button id="btn-partial" title="Label the episode a partial success">◐ Partial</button>
+          <button id="btn-dev-bad" title="Label the episode a failure">👎 Failure</button>
+        </div>
+        <div id="trajectory-view" class="report"><em>No episode yet</em></div>
+        <div class="row">
+          <button id="btn-export-traj" title="Download every logged episode as JSONL">Export JSONL</button>
+          <button id="btn-replay" title="Re-execute the last episode and verify checkpoints">Verify replay</button>
+          <button id="btn-clear-traj" class="muted-btn">clear log</button>
+        </div>
+        <h4>RL policy</h4>
+        <div class="row"><button id="btn-reset-policy" class="muted-btn">reset policy</button></div>
+        <div id="policy-view" class="report"></div>
+        <h4>Log</h4>
+        <pre id="log"></pre>
+      </section>
+    </aside>
+
+    <!-- AI dock: always visible, beside (or below) the editing tools -->
+    <aside id="ai-dock" class="dock">
+      <div class="dock-tabs"><button class="active">✦ AI <span id="ai-badge" class="badge"></span></button></div>
+      <section class="dock-body ai-panel" data-dock-panel="agents">
         <div class="ai-modes">
           <button data-ai-mode="create" class="active">Text to 3D</button>
           <button data-ai-mode="image">Image to 3D</button>
@@ -179,28 +207,6 @@
         <div id="history" class="history"><em class="muted">Generations appear here</em></div>
       </section>
 
-      <!-- Developer panel: agent internals, hidden by default (Windows → Developer) -->
-      <section class="dock-body hidden" data-dock-panel="dev">
-        <h4>Optimizer report</h4>
-        <div id="opt-report" class="report"><em>No run yet</em></div>
-        <h4>Episode annotation → reward</h4>
-        <div class="row">
-          <button id="btn-dev-good" title="Label the episode a success">👍 Success</button>
-          <button id="btn-partial" title="Label the episode a partial success">◐ Partial</button>
-          <button id="btn-dev-bad" title="Label the episode a failure">👎 Failure</button>
-        </div>
-        <div id="trajectory-view" class="report"><em>No episode yet</em></div>
-        <div class="row">
-          <button id="btn-export-traj" title="Download every logged episode as JSONL">Export JSONL</button>
-          <button id="btn-replay" title="Re-execute the last episode and verify checkpoints">Verify replay</button>
-          <button id="btn-clear-traj" class="muted-btn">clear log</button>
-        </div>
-        <h4>RL policy</h4>
-        <div class="row"><button id="btn-reset-policy" class="muted-btn">reset policy</button></div>
-        <div id="policy-view" class="report"></div>
-        <h4>Log</h4>
-        <pre id="log"></pre>
-      </section>
     </aside>
 
     <!-- Command line + help line -->

@@ -1,5 +1,7 @@
 import { SceneDocument, buildGeometry, toOBJ, PRIMITIVES, MODIFIERS, primitiveDefaults, defaultPart, DEFAULT_PROFILE } from "./scene-model.js";
 import { Viewport } from "./viewport.js";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { transformToMatrix, matrixToTransform, identityTransform } from "./scene-model.js";
 import { OptimizerPool } from "./geometry/optimizer-client.js";
 import { Orchestrator } from "./agents/orchestrator.js";
 import { Policy, computeReward } from "./rl/policy.js";
@@ -44,10 +46,13 @@ setInterval(refreshBackendStatus, 10000);
 const selection = () => viewport.selection;
 const selPart = () => (selection()?.type === "part" ? doc.get(selection().id) : null);
 const selComp = () => (selection()?.type === "component" ? doc.getComponent(selection().id) : null);
+// Every part covered by the selection set (parts directly, or all parts of selected components).
+const selectedParts = () => viewport.selectionSet().flatMap((s) => (s.type === "part" ? [doc.get(s.id)] : doc.partsOf(s.id))).filter(Boolean);
+const partWorld = (p) => { const c = doc.getComponent(p.componentId); const m = transformToMatrix(p.transform); return c ? transformToMatrix(c.transform).multiply(m) : m; };
 
 // ---- commands (menus, shelf, toolbox, hotkeys all route here) ------------------
 const TOOL_HELP = {
-  select: "Select Tool: click a component, click again to drill into its part (↑ back to the component). Alt+LMB orbit · Alt+MMB pan · wheel zoom · F frame · A frame all",
+  select: "Select Tool: click a component, click again for its part (↑ back), Shift+click to add, ⌘A all, ⌘G group. Alt+LMB orbit · Alt+MMB pan · wheel zoom · F frame · A frame all",
   translate: "Move Tool: drag the arrows (X red, Y green, Z blue). Moves the whole component or just the part, whichever is selected.",
   rotate: "Rotate Tool: drag a ring to rotate about that axis. Snap gives 15° steps.",
   scale: "Scale Tool: drag an axis cube for non-uniform scale, the center cube for uniform.",
@@ -59,7 +64,55 @@ const commands = {
     const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "morsy.obj" }); a.click();
     cmdResult(`Exported 1 object · ${doc.components.size} groups · ${doc.parts.size} parts → morsy.obj`);
   },
+  "export-glb": async () => {
+    // glTF binary: the de-facto interchange for web/game engines. The scene graph
+    // (model → component groups → part meshes) is exported as-is, so component
+    // names survive as node names.
+    const glb = await new GLTFExporter().parseAsync(viewport.model, { binary: true });
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" })), download: "morsy.glb" }); a.click();
+    cmdResult(`Exported morsy.glb · ${doc.components.size} nodes · ${(glb.byteLength / 1024).toFixed(0)} KB`);
+  },
   "import-image": () => { showDock("agents"); setAiMode("image"); $("#image-input").click(); },
+  // Bake each component's transform into its parts (component becomes identity),
+  // like Maya's Freeze Transformations on a group.
+  freeze: () => {
+    const comps = selComp() ? [selComp()] : selPart() ? [doc.componentOf(selPart().id)] : doc.listComponents();
+    doc.transaction(() => {
+      for (const c of comps) {
+        const M = transformToMatrix(c.transform);
+        doc.applyOps([
+          ...doc.partsOf(c.id).map((p) => ({ op: "update", id: p.id, patch: { transform: matrixToTransform(M.clone().multiply(transformToMatrix(p.transform))) } })),
+          { op: "updateComponent", id: c.id, patch: { transform: identityTransform() } },
+        ]);
+      }
+    });
+    cmdResult(`Froze transformations on ${comps.length} component(s)`);
+  },
+  // ⌘G: group the selected parts into a new component; Ungroup: one component per part.
+  group: () => {
+    const parts = selectedParts(); if (!parts.length) { cmdResult("Select parts to group (Shift+click)", true); return; }
+    const comp = { name: `group${doc.components.size + 1}` };
+    doc.transaction(() => {
+      doc.applyOps([{ op: "addComponent", component: comp }]);
+      const id = doc.listComponents().at(-1).id;
+      // keep world placement: new component is identity, so part transforms become their world transforms
+      doc.applyOps(parts.map((p) => ({ op: "update", id: p.id, patch: { componentId: id, transform: matrixToTransform(partWorld(p)) } })));
+      viewport.select({ type: "component", id });
+    });
+    cmdResult(`Grouped ${parts.length} part(s)`);
+  },
+  ungroup: () => {
+    const c = selComp(); if (!c) { cmdResult("Select a component to ungroup", true); return; }
+    doc.transaction(() => {
+      for (const p of doc.partsOf(c.id)) {
+        doc.applyOps([{ op: "addComponent", component: { name: p.name.replace(/^.*?:\s*/, "") || p.name } }]);
+        const id = doc.listComponents().at(-1).id;
+        doc.applyOps([{ op: "update", id: p.id, patch: { componentId: id, transform: matrixToTransform(partWorld(p)) } }]);
+      }
+      viewport.select(null);
+    });
+    cmdResult(`Ungrouped ${c.name}`);
+  },
   undo: () => doc.undo(), redo: () => doc.redo(),
   duplicate: () => {
     const p = selPart(), c = selComp(); if (!p && !c) return;
@@ -69,11 +122,10 @@ const commands = {
       doc.applyOps(doc.partsOf(c.id).map((part) => { const cp = JSON.parse(JSON.stringify(part)); delete cp.id; cp.componentId = newId; return { op: "add", part: cp }; }));
       viewport.select({ type: "component", id: newId }); });
   },
-  delete: () => { const p = selPart(), c = selComp(); if (p) doc.applyOps([{ op: "remove", id: p.id }]); else if (c) doc.applyOps([{ op: "removeComponent", id: c.id }]); },
+  delete: () => { const set = viewport.selectionSet(); if (!set.length) return; doc.applyOps(set.map((s) => (s.type === "part" ? { op: "remove", id: s.id } : { op: "removeComponent", id: s.id }))); cmdResult(`Deleted ${set.length} item(s)`); },
   "select-parent": () => viewport.selectParent(),
-  "select-all": () => cmdResult("Multi-select is not implemented yet — select from the Outliner"),
+  "select-all": () => { viewport.selectAll(viewport.selection?.type ?? (viewport.selectMode === "part" ? "part" : "component")); cmdResult(`Selected ${viewport.selectionSet().length} item(s) — Shift+click to add or remove`); },
   "center-pivot": () => { const o = viewport.selectedObject(); const s = selection(); if (!o) return; const box = new (Object.getPrototypeOf(viewport.selBox.box).constructor)().setFromObject(o, true); const dy = -box.min.y; const t = (s.type === "part" ? selPart() : selComp()).transform; const transform = { position: [t.position[0], t.position[1] + dy, t.position[2]] }; doc.applyOps([s.type === "part" ? { op: "update", id: s.id, patch: { transform } } : { op: "updateComponent", id: s.id, patch: { transform } }]); },
-  freeze: () => cmdResult("Freeze Transformations bakes into geometry — coming soon"),
   "optimize-sel": async () => {
     const parts = selPart() ? [selPart()] : selComp() ? doc.partsOf(selComp().id) : []; if (!parts.length) return;
     showDock("agents"); const reports = [];
@@ -127,7 +179,8 @@ function createPrimitive(type) {
 const SHELVES = {
   polygons: () => [...PRIMITIVES.map((t) => ({ icon: PRIM_ICON[t], title: `Polygon ${PRIM_LABEL[t]}`, run: () => createPrimitive(t) })), { sep: true },
     { label: "Optimize", title: "Run the geometry optimizer on the scene", run: () => runCmd("optimize") },
-    { label: "Export", title: "Export OBJ (one object, a group per component)", run: () => runCmd("export") }],
+    { label: "Export GLB", title: "Export glTF binary (components become nodes)", run: () => runCmd("export-glb") },
+    { label: "OBJ", title: "Export OBJ (one object, a group per component)", run: () => runCmd("export") }],
   deform: () => MODIFIERS.map((m) => ({ label: m, title: `Add ${m} modifier to the selected part`, run: () => addModifier(m) })),
   ai: () => [
     { label: "✦ Text to 3D", title: "Create an object from a text prompt", run: () => { showDock("agents"); setAiMode("create"); $("#prompt").focus(); } },
@@ -156,10 +209,12 @@ $$("#toolbox [data-layout]").forEach((b) => (b.onclick = () => { $$("#toolbox [d
 $("#snap-grid").onchange = (e) => viewport.setSnap(e.target.checked);
 $("#select-mode").onchange = (e) => { viewport.setSelectMode(e.target.value); help(e.target.value === "component" ? "Component mode: a click selects the whole component (the boat, an oar). Click again to drill into a part." : "Part mode: a click selects the individual part under the cursor."); };
 function setShading(mode) { viewport.setShading(mode); $$(".panel-icons [data-cmd^='shade-']").forEach((b) => b.classList.toggle("active", b.dataset.cmd === `shade-${mode}`)); }
-$("#mode-select").onchange = (e) => showDock(e.target.value === "AI" ? "agents" : "channel");
+$("#mode-select").onchange = (e) => { if (e.target.value === "AI") $("#prompt").focus(); else showDock("channel"); };
 
-// right dock tabs
+// editing dock tabs (Channel Box / Attribute Editor / Developer). The AI panel has
+// its own dock and is always visible, so "agents" just scrolls it into view.
 function showDock(name) {
+  if (name === "agents") { $("#ai-dock").scrollIntoView({ block: "nearest" }); return; }
   $$("#right-dock .dock-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.dock === name));
   $$("#right-dock [data-dock-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.dockPanel !== name));
 }
@@ -167,10 +222,12 @@ $$("#right-dock .dock-tabs button").forEach((b) => (b.onclick = () => showDock(b
 
 // hotkeys
 window.addEventListener("keydown", (e) => {
-  if (e.target.matches("input, textarea, select")) { if (e.key === "Escape") e.target.blur(); return; }
+  if (e.target?.matches?.("input, textarea, select")) { if (e.key === "Escape") e.target.blur(); return; }
   const k = e.key.toLowerCase(); const mod = e.metaKey || e.ctrlKey;
   if (mod && k === "z") { e.preventDefault(); e.shiftKey ? doc.redo() : doc.undo(); }
   else if (mod && k === "d") { e.preventDefault(); runCmd("duplicate"); }
+  else if (mod && k === "a") { e.preventDefault(); runCmd("select-all"); }
+  else if (mod && k === "g") { e.preventDefault(); runCmd(e.shiftKey ? "ungroup" : "group"); }
   else if (mod && k === "n") { e.preventDefault(); runCmd("new"); }
   else if (k === "q") setTool("select"); else if (k === "w") setTool("translate"); else if (k === "e") setTool("rotate"); else if (k === "r") setTool("scale");
   else if (k === "4") setShading("wire"); else if (k === "5") setShading("smooth"); else if (k === "6") setShading("uv");
@@ -196,22 +253,23 @@ function renderOutliner() {
     const parts = doc.partsOf(c.id).filter((p) => !outlinerFilter || p.name.toLowerCase().includes(outlinerFilter) || c.name.toLowerCase().includes(outlinerFilter));
     if (outlinerFilter && !parts.length && !c.name.toLowerCase().includes(outlinerFilter)) continue;
     const isCol = collapsed.has(c.id);
-    const li = document.createElement("li"); li.className = "group" + (s?.type === "component" && s.id === c.id ? " selected" : "");
+    const set = viewport.selectionSet();
+    const li = document.createElement("li"); li.className = "group" + (set.some((x) => x.type === "component" && x.id === c.id) ? " selected" : "");
     li.innerHTML = `<span class="vis arrow">${isCol ? "▸" : "▾"}</span><span class="node-ico comp"></span><span>${esc(c.name)}</span><span class="tri">${parts.length}</span>`;
     li.title = c.meta?.agent ? `component · modeled by ${c.meta.agent}` : "component";
     li.querySelector(".arrow").onclick = (e) => { e.stopPropagation(); isCol ? collapsed.delete(c.id) : collapsed.add(c.id); renderOutliner(); };
-    li.onclick = () => viewport.select({ type: "component", id: c.id });
+    li.onclick = (e) => viewport.select({ type: "component", id: c.id }, { add: e.shiftKey || e.metaKey });
     li.ondblclick = () => { viewport.select({ type: "component", id: c.id }); viewport.frameSelected(); };
     ul.appendChild(li);
     if (isCol) continue;
     for (const p of parts) {
-      const row = document.createElement("li"); row.className = "child" + (s?.type === "part" && s.id === p.id ? " selected" : "");
+      const row = document.createElement("li"); row.className = "child" + (set.some((x) => x.type === "part" && x.id === p.id) ? " selected" : "");
       const label = p.name.startsWith(c.name + ":") ? p.name.slice(c.name.length + 1).trim() : p.name;
       const tris = p.optimized ? p.optimized.indices.length / 3 : "…";
       row.innerHTML = `<span class="vis" title="Toggle visibility">${p.visible === false ? "○" : "●"}</span><span class="node-ico"></span><span>${esc(label)}</span><span class="tri">${tris}△</span>`;
       row.title = `${p.primitive.type}${p.modifiers.length ? " + " + p.modifiers.map((m) => m.type).join(", ") : ""}`;
       row.querySelector(".vis").onclick = (e) => { e.stopPropagation(); doc.applyOps([{ op: "update", id: p.id, patch: { visible: p.visible === false } }], { record: false }); };
-      row.onclick = () => viewport.select({ type: "part", id: p.id });
+      row.onclick = (e) => viewport.select({ type: "part", id: p.id }, { add: e.shiftKey || e.metaKey });
       row.ondblclick = () => { viewport.select({ type: "part", id: p.id }); viewport.frameSelected(); };
       ul.appendChild(row);
     }
@@ -227,11 +285,12 @@ function renderChannelBox(s, live) {
   const el = $("#channel-box");
   const node = s?.type === "part" ? doc.get(s.id) : s?.type === "component" ? doc.getComponent(s.id) : null;
   if (!node) { el.innerHTML = `<em class="muted">Nothing selected</em>`; return; }
+  const extra = viewport.extra.length;
   const obj = viewport.selectedObject();
   const t = live && obj ? { position: obj.position.toArray(), rotation: obj.rotation.toArray().slice(0, 3).map((r) => (r * 180) / Math.PI), scale: obj.scale.toArray() } : node.transform;
   const row = (label, cls, path, v, step = 0.01) => `<div class="cb-row"><label class="${cls}">${label}</label><input type="number" step="${step}" data-path="${path}" value="${+(+v).toFixed(3)}"></div>`;
   const xyz = (name, key, arr) => ["X", "Y", "Z"].map((ax, i) => row(`${name} ${ax}`, ax.toLowerCase(), `transform.${key}.${i}`, arr[i], key === "rotation" ? 1 : 0.01)).join("");
-  let html = `<div class="cb-name">${esc(node.name)} <span class="muted">(${s.type})</span></div>${xyz("Translate", "position", t.position)}${xyz("Rotate", "rotation", t.rotation)}${xyz("Scale", "scale", t.scale)}
+  let html = `<div class="cb-name">${esc(node.name)} <span class="muted">(${s.type}${extra ? ` +${extra} more` : ""})</span></div>${xyz("Translate", "position", t.position)}${xyz("Rotate", "rotation", t.rotation)}${xyz("Scale", "scale", t.scale)}
     <div class="cb-row"><label>Visibility</label><input type="number" step="1" min="0" max="1" data-path="visible" value="${node.visible === false ? 0 : 1}"></div>`;
   if (s.type === "part") {
     const params = Object.keys(primitiveDefaults(node.primitive.type)).map((k) => row(k, "", `primitive.params.${k}`, node.primitive.params[k] ?? 0, /segments/i.test(k) ? 1 : 0.01)).join("");
@@ -491,6 +550,6 @@ renderTrajectory();
 renderOutliner();
 setTool("select");
 setAiMode("create");
-showDock(doc.parts.size ? "channel" : "agents"); // empty scene → start on the AI panel
+showDock("channel");
 if (doc.parts.size) { viewport.frameAll(); log(`restored ${doc.components.size} component(s), ${doc.parts.size} part(s) from the last session`); }
 log("Morsy ready. Type a request in the command line below, or pick a primitive from the shelf.");

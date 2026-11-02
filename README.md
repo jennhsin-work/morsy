@@ -65,7 +65,10 @@ Open http://localhost:5173. Without the backend the app still works: a rule-base
 - **✦ AI dock** (Meshy-style, conversational): the agents narrate what they do ("Planned 4 components…", "Modeled wheels — 8 parts"), then **review their own result** — Morsy renders the model from four angles, asks Claude to critique it against the request, and applies the fixes (up to 2 rounds) before saying done; the thumbnails it looked at appear inline. Follow-ups go in the same box.
 - **✦ AI dock** layout: *Text to 3D* / *Image to 3D* / *Edit* tabs, prompt, Style and Detail chips, Generate, a progress strip showing components as they finish, 👍/👎 on the result, and a History of generations with thumbnails (click one to restore it).
 - **Windows → Developer** opens the hidden internals panel: optimizer report, episode annotation, reward breakdown, constraint checks, per-step labels, Export JSONL, Verify replay, RL policy, log.
-- Hotkeys: Q W E R tools · 4 5 6 shading · F/A frame · G grid · X snap · ⌘Z/⇧⌘Z · ⌘D · ⌫ · Space persp.
+- **Selection**: click = component, click again = part, ↑ = parent; **Shift+click** adds/removes; **⌘A** selects all; the gizmo moves/rotates/scales the whole set around its centre. **⌘G** groups selected parts into a new component, **⇧⌘G** ungroups; Modify → Freeze Transformations bakes a component's transform into its parts.
+- **Export**: File → Export GLB (glTF binary, components become nodes) or OBJ.
+- Layout: editing tools (Channel Box / Attribute Editor) and the ✦ AI panel are separate docks — side by side on wide screens, stacked on narrower ones.
+- Hotkeys: Q W E R tools · 4 5 6 shading · F/A frame · G grid · X snap · ⌘Z/⇧⌘Z · ⌘D · ⌘A · ⌘G/⇧⌘G · ⌫ · Space persp.
 
 ## Layout
 

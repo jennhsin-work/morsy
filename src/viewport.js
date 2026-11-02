@@ -15,7 +15,8 @@ export class Viewport {
   constructor(container, doc, { onSelect, onStats, helperEl }) {
     this.container = container; this.doc = doc; this.onSelect = onSelect; this.onStats = onStats;
     this.meshes = new Map(); this.groups = new Map();
-    this.selection = null; // { type: "component"|"part", id }
+    this.selection = null; // primary { type: "component"|"part", id }
+    this.extra = [];       // additional selections (Shift+click), same shape
     this.selectMode = "component"; this.shading = "smooth";
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -42,9 +43,11 @@ export class Viewport {
     this.renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
     this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
-    this.gizmo.addEventListener("dragging-changed", (e) => { this.orbit.enabled = !e.value; if (!e.value) this.commitGizmo(); });
-    this.gizmo.addEventListener("objectChange", () => { this.gizmoDirty = true; this.onSelect?.(this.selection, true); });
+    this.gizmo.addEventListener("dragging-changed", (e) => { this.orbit.enabled = !e.value; e.value ? this.beginDrag() : this.commitGizmo(); });
+    this.gizmo.addEventListener("objectChange", () => { this.gizmoDirty = true; this.applyPivotDelta(); this.onSelect?.(this.selection, true); });
     this.scene.add(this.gizmo.getHelper()); this.gizmo.enabled = false; this.gizmo.visible = false;
+    // Multi-selection pivot: the gizmo drives this empty, and its delta is applied to every selected object.
+    this.pivot = new THREE.Group(); this.pivot.name = "pivot"; this.scene.add(this.pivot);
 
     this.viewHelper = new ViewHelper(this.camera, helperEl); this.viewHelper.center = this.orbit.target;
     helperEl.addEventListener("pointerup", (e) => this.viewHelper.handleClick(e));
@@ -84,17 +87,45 @@ export class Viewport {
     this.gizmo.setMode(tool); this.gizmo.enabled = true; this.attachGizmo();
   }
   attachGizmo() {
-    const obj = this.selectedObject();
-    if (obj && this.gizmo.enabled) { this.gizmo.attach(obj); this.gizmo.visible = true; } else { this.gizmo.detach(); this.gizmo.visible = false; }
+    const objs = this.selectedObjects();
+    if (!objs.length || !this.gizmo.enabled) { this.gizmo.detach(); this.gizmo.visible = false; return; }
+    if (objs.length === 1) { this.gizmo.attach(objs[0]); this.gizmo.visible = true; return; }
+    // Several: park the pivot at the set's centre and drive that.
+    const box = new THREE.Box3(); for (const o of objs) box.expandByObject(o, true);
+    this.pivot.position.copy(box.getCenter(new THREE.Vector3())); this.pivot.rotation.set(0, 0, 0); this.pivot.scale.set(1, 1, 1);
+    this.gizmo.attach(this.pivot); this.gizmo.visible = true;
   }
   setSnap(on) { this.gizmo.setTranslationSnap(on ? 0.1 : null); this.gizmo.setRotationSnap(on ? THREE.MathUtils.degToRad(15) : null); this.gizmo.setScaleSnap(on ? 0.1 : null); }
 
+  beginDrag() {
+    if (this.gizmo.object !== this.pivot) return;
+    this.pivot.updateMatrixWorld(true);
+    this.dragStart = { pivotInv: this.pivot.matrixWorld.clone().invert(), objs: this.selectedObjects().map((o) => { o.updateMatrixWorld(true); return { o, world: o.matrixWorld.clone() }; }) };
+  }
+  // world' = pivotNow · pivotStart⁻¹ · worldStart, then back into each object's parent space.
+  applyPivotDelta() {
+    if (this.gizmo.object !== this.pivot || !this.dragStart) return;
+    this.pivot.updateMatrixWorld(true);
+    const delta = this.pivot.matrixWorld.clone().multiply(this.dragStart.pivotInv);
+    const parentInv = new THREE.Matrix4();
+    for (const { o, world } of this.dragStart.objs) {
+      o.parent.updateMatrixWorld(true); parentInv.copy(o.parent.matrixWorld).invert();
+      const local = parentInv.multiply(delta.clone().multiply(world));
+      local.decompose(o.position, o.quaternion, o.scale);
+    }
+  }
+
   commitGizmo() {
     if (!this.gizmoDirty || !this.selection) return; this.gizmoDirty = false;
-    const obj = this.selectedObject(); if (!obj) return;
     const deg = (r) => +THREE.MathUtils.radToDeg(r).toFixed(2);
-    const transform = { position: obj.position.toArray().map((v) => +v.toFixed(4)), rotation: [deg(obj.rotation.x), deg(obj.rotation.y), deg(obj.rotation.z)], scale: obj.scale.toArray().map((v) => +v.toFixed(4)) };
-    this.doc.applyOps([this.selection.type === "component" ? { op: "updateComponent", id: this.selection.id, patch: { transform } } : { op: "update", id: this.selection.id, patch: { transform } }]);
+    const ops = [];
+    for (const s of this.selectionSet()) {
+      const obj = s.type === "component" ? this.groups.get(s.id) : this.meshes.get(s.id); if (!obj) continue;
+      const transform = { position: obj.position.toArray().map((v) => +v.toFixed(4)), rotation: [deg(obj.rotation.x), deg(obj.rotation.y), deg(obj.rotation.z)], scale: obj.scale.toArray().map((v) => +v.toFixed(4)) };
+      ops.push(s.type === "component" ? { op: "updateComponent", id: s.id, patch: { transform } } : { op: "update", id: s.id, patch: { transform } });
+    }
+    this.dragStart = null;
+    this.doc.applyOps(ops);
   }
 
   // ---- picking ---------------------------------------------------------------
@@ -107,8 +138,13 @@ export class Viewport {
   onPointerUp(e) {
     if (!this.down || this.down[2] || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 4 || this.gizmo.dragging) return;
     const hit = this.pick(e);
-    if (!hit) { this.select(null); return; }
+    if (!hit) { if (!e.shiftKey) this.select(null); return; }
     const partId = hit.userData.id; const compId = this.doc.get(partId)?.componentId;
+    const add = e.shiftKey;
+    if (add) { // Shift+click: add/toggle at the level of the current selection (or the pick mode)
+      const level = this.selection?.type ?? (this.selectMode === "component" ? "component" : "part");
+      this.select(level === "component" ? { type: "component", id: compId } : { type: "part", id: partId }, { add: true }); return;
+    }
     // Component mode: first click picks the component; clicking inside an already
     // selected component drills to the part (Maya-like "select hierarchy → child").
     if (this.selectMode === "component" && !(this.selection?.type === "component" && this.selection.id === compId) && !(this.selection?.type === "part" && this.doc.get(this.selection.id)?.componentId === compId))
@@ -128,22 +164,39 @@ export class Viewport {
     if (!this.selection) return null;
     return this.selection.type === "component" ? this.groups.get(this.selection.id) ?? null : this.meshes.get(this.selection.id) ?? null;
   }
-  select(selection) {
-    this.selection = selection && (selection.type === "component" ? this.groups.has(selection.id) : this.meshes.has(selection.id)) ? selection : null;
+  selectionSet() { return this.selection ? [this.selection, ...this.extra] : []; }
+  selectedObjects() { return this.selectionSet().map((s) => (s.type === "component" ? this.groups.get(s.id) : this.meshes.get(s.id))).filter(Boolean); }
+  exists(s) { return s && (s.type === "component" ? this.groups.has(s.id) : this.meshes.has(s.id)); }
+  // add: Shift semantics — toggle membership; the clicked item becomes primary.
+  select(selection, { add = false } = {}) {
+    const same = (a, b) => a && b && a.type === b.type && a.id === b.id;
+    if (!this.exists(selection)) selection = null;
+    if (add && selection) {
+      const set = this.selectionSet();
+      if (set.some((s) => same(s, selection))) { // toggle off
+        const rest = set.filter((s) => !same(s, selection)); this.selection = rest[0] ?? null; this.extra = rest.slice(1);
+      } else { this.extra = set.filter((s) => s.type === selection.type); this.selection = selection; } // mixed levels are not allowed
+    } else { this.selection = selection; this.extra = []; }
     for (const [pid, m] of this.meshes) this.applyMaterial(m, this.doc.get(pid));
     this.attachGizmo(); this.updateSelBox();
     this.onSelect?.(this.selection);
   }
+  selectAll(type = "component") {
+    const ids = type === "component" ? [...this.groups.keys()] : [...this.meshes.keys()];
+    if (!ids.length) return; this.selection = { type, id: ids[0] }; this.extra = ids.slice(1).map((id) => ({ type, id }));
+    for (const [pid, m] of this.meshes) this.applyMaterial(m, this.doc.get(pid));
+    this.attachGizmo(); this.updateSelBox(); this.onSelect?.(this.selection);
+  }
   selectParent() { if (this.selection?.type === "part") this.select({ type: "component", id: this.doc.get(this.selection.id).componentId }); }
   setSelectMode(mode) { this.selectMode = mode; if (mode === "component" && this.selection?.type === "part") this.selectParent(); }
   updateSelBox() {
-    const obj = this.selectedObject();
-    if (!obj) { this.selBox.visible = false; return; }
-    this.selBox.box.setFromObject(obj, true); this.selBox.visible = true;
+    const objs = this.selectedObjects();
+    if (!objs.length) { this.selBox.visible = false; return; }
+    const box = new THREE.Box3(); for (const o of objs) box.expandByObject(o, true);
+    this.selBox.box.copy(box); this.selBox.visible = true;
   }
   isSelected(part) {
-    if (!this.selection) return false;
-    return this.selection.type === "part" ? this.selection.id === part.id : this.selection.id === part.componentId;
+    return this.selectionSet().some((s) => (s.type === "part" ? s.id === part.id : s.id === part.componentId));
   }
 
   // ---- shading ---------------------------------------------------------------
@@ -153,7 +206,7 @@ export class Viewport {
     if (!part) return;
     if (mesh.userData.ownMat && mesh.material !== this.uvMaterial) mesh.material.dispose();
     if (this.shading === "uv") { mesh.material = this.uvMaterial; mesh.userData.ownMat = false; return; }
-    const selected = this.isSelected(part); const strong = selected && this.selection.type === "part";
+    const selected = this.isSelected(part); const strong = selected && this.selection?.type === "part";
     const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(part.material.color || "#999"), roughness: part.material.roughness ?? 0.7, metalness: part.material.metalness ?? 0.05, wireframe: this.shading === "wire", side: THREE.DoubleSide });
     if (selected) { mat.emissive.set(0x3b6f91); mat.emissiveIntensity = strong ? 1 : 0.45; if (this.shading === "wire") mat.color.set(0x80b7e0); }
     else if (this.shading === "wire") mat.color.set(0x9ac8ff);
@@ -191,7 +244,8 @@ export class Viewport {
     }
     // drop empty groups
     for (const [cid, g] of this.groups) if (!this.doc.getComponent(cid)) { this.model.remove(g); this.groups.delete(cid); }
-    if (this.selection && !this.selectedObject()) this.select(null); else { this.updateSelBox(); if (this.gizmo.enabled) this.attachGizmo(); }
+    this.extra = this.extra.filter((s) => this.exists(s));
+    if (this.selection && !this.selectedObject()) this.select(this.extra[0] ?? null); else { this.updateSelBox(); if (this.gizmo.enabled && !this.gizmo.dragging) this.attachGizmo(); }
     this.stats();
   }
   stats() {
