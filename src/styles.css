@@ -201,11 +201,12 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 3px 0; }
 .ai-progress { margin-top: 10px; }
 .ai-progress-head { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
 .ai-progress .bar { height: 4px; background: var(--bg-dark); border-radius: 2px; overflow: hidden; }
-.ai-progress .bar i { display: block; height: 100%; background: var(--accent-2); width: 0; transition: width .4s; }
+.ai-progress .bar i { display: block; height: 100%; background: var(--border-light); width: 0; transition: width .4s; }
+.ai-progress-head { color: var(--text-dim); }
 .comp-chips { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
 .comp-chips li { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-dark); color: var(--text-dim); border: 1px solid var(--border); }
-.comp-chips li.running { color: var(--warn); border-color: var(--warn); }
-.comp-chips li.done { color: var(--ok); }
+.comp-chips li.running { color: var(--text); border-color: var(--border-light); }
+.comp-chips li.done { color: var(--text-dim); border-color: var(--border); }
 .comp-chips li.error { color: var(--bad); }
 /* conversational transcript */
 .transcript { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: 42vh; overflow-y: auto; padding-right: 2px; }
@@ -213,13 +214,14 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 3px 0; }
 .transcript .msg { font-size: 11px; line-height: 1.4; }
 .transcript .user { align-self: flex-end; max-width: 92%; background: var(--sel); color: #fff; border-radius: 10px 10px 2px 10px; padding: 5px 9px; }
 .transcript .agent { display: grid; grid-template-columns: 10px 1fr; gap: 6px; color: var(--text); }
-.transcript .agent::before { content: "●"; color: var(--accent-2); font-size: 8px; line-height: 15px; }
-.transcript .agent.review::before { content: "◉"; }
+.transcript .agent::before { content: "●"; color: var(--text-dim); font-size: 7px; line-height: 15px; }
+.transcript .agent.review::before { content: "◎"; }
 .transcript .agent.done::before { color: var(--ok); }
 .transcript .agent.warn::before { color: var(--warn); }
 .transcript .agent .detail { color: var(--text-dim); font-size: 10px; margin-top: 1px; }
-.transcript .status { display: grid; grid-template-columns: 10px 1fr; gap: 6px; color: var(--warn); font-size: 11px; }
-.transcript .status::before { content: "✱"; animation: spin 1.2s linear infinite; display: inline-block; font-size: 10px; line-height: 15px; }
+/* Working indicator: quiet grey text with a thin spinning ring, nothing branded. */
+.transcript .status { display: grid; grid-template-columns: 10px 1fr; gap: 6px; color: var(--text-dim); font-size: 11px; font-style: italic; }
+.transcript .status::before { content: ""; width: 9px; height: 9px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--border-light); border-top-color: var(--text-dim); animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .transcript .thumbs { display: flex; gap: 3px; margin-top: 4px; }
 .transcript .thumbs img { width: 25%; aspect-ratio: 4/3; object-fit: cover; border-radius: 3px; border: 1px solid var(--border); cursor: zoom-in; }

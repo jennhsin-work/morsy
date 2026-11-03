@@ -45,7 +45,7 @@
         <div class="menu"><button>Windows</button><div class="dropdown">
           <button data-cmd="dock-channel">Channel Box</button>
           <button data-cmd="dock-attr">Attribute Editor</button>
-          <button data-cmd="dock-agents">AI panel (focus prompt)</button>
+          <button data-cmd="dock-agents">AI panel</button>
           <hr><button data-cmd="dock-dev">Developer (agent internals)</button>
         </div></div>
         <div class="menu"><button>Help</button><div class="dropdown">
@@ -154,7 +154,7 @@
 
     <!-- AI dock: always visible, beside (or below) the editing tools -->
     <aside id="ai-dock" class="dock">
-      <div class="dock-tabs"><button class="active">✦ AI <span id="ai-badge" class="badge"></span></button></div>
+      <div class="dock-tabs"><button class="active">AI <span id="ai-badge" class="badge"></span></button></div>
       <section class="dock-body ai-panel" data-dock-panel="agents">
         <div class="ai-modes">
           <button data-ai-mode="create" class="active">Text to 3D</button>
@@ -184,7 +184,7 @@
               <button type="button" data-tess="high">High</button>
             </div>
           </div>
-          <button type="submit" id="btn-run" class="primary ai-generate">✦ Generate</button>
+          <button type="submit" id="btn-run" class="primary ai-generate">Generate</button>
         </form>
 
         <div id="ai-progress" class="ai-progress hidden">

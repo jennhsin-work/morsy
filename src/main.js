@@ -183,8 +183,8 @@ const SHELVES = {
     { label: "OBJ", title: "Export OBJ (one object, a group per component)", run: () => runCmd("export") }],
   deform: () => MODIFIERS.map((m) => ({ label: m, title: `Add ${m} modifier to the selected part`, run: () => addModifier(m) })),
   ai: () => [
-    { label: "✦ Text to 3D", title: "Create an object from a text prompt", run: () => { showDock("agents"); setAiMode("create"); $("#prompt").focus(); } },
-    { label: "✦ Image to 3D", title: "Create an object from a reference image", run: () => { showDock("agents"); setAiMode("image"); $("#image-input").click(); } },
+    { label: "Text to 3D", title: "Create an object from a text prompt", run: () => { showDock("agents"); setAiMode("create"); $("#prompt").focus(); } },
+    { label: "Image to 3D", title: "Create an object from a reference image", run: () => { showDock("agents"); setAiMode("image"); $("#image-input").click(); } },
     { label: "✎ Edit", title: "Change the current model from a text prompt", run: () => { showDock("agents"); setAiMode("edit"); $("#prompt").focus(); } },
   ],
 };
@@ -364,7 +364,7 @@ function setAiMode(m) {
   $$(".ai-modes button").forEach((b) => b.classList.toggle("active", b.dataset.aiMode === m));
   $("#image-drop").classList.toggle("hidden", m !== "image");
   $("#prompt").placeholder = PLACEHOLDER[m];
-  $("#btn-run").textContent = m === "edit" ? "✦ Apply edit" : "✦ Generate";
+  $("#btn-run").textContent = m === "edit" ? "Apply edit" : "Generate";
   help(m === "edit" ? "Edit: describe a change; only the parts it mentions are touched." : m === "image" ? "Image to 3D: pick a reference image, add a short description, Generate." : "Text to 3D: describe the object, pick a style, Generate. Click any component afterwards to adjust it with the Maya tools.");
 }
 $$(".ai-modes button").forEach((b) => (b.onclick = () => setAiMode(b.dataset.aiMode)));
