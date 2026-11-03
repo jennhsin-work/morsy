@@ -7,43 +7,62 @@
 import http from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { Plan, ComponentResult, EditResult, ReviewResult } from "../src/agents/schema.js";
+import { Plan, ComponentResult, EditResult, ReviewResult, DetailResult } from "../src/agents/schema.js";
 
 const MODEL = process.env.MORSY_MODEL || "claude-opus-5-5";
 const PORT = +(process.env.PORT || 8787);
 const client = new Anthropic(); // ANTHROPIC_API_KEY or `ant auth login` profile
 
 const SYSTEM = `You are a modeling agent inside Morsy, a parametric 3D modeling workspace.
-You build objects from primitives (box, cylinder, sphere, cone, torus, plane, capsule, lathe, extrude) with a
-modifier stack (taper, twist, bend, noise, mirror, array, subdivide), each with a transform and a PBR material.
-Units are metres, Y is up, the ground plane is y=0. Rotations are Euler XYZ in degrees.
-Primitive params by type:
+You build objects from primitives with a modifier stack, each part with a transform and a PBR material.
+Units are metres, Y is up, the ground plane is y=0. Rotations are Euler XYZ in degrees. Colours are hex strings.
+
+PRIMITIVES (params by type)
   box{width,height,depth,segments} cylinder{radiusTop,radiusBottom,height,radialSegments,heightSegments}
   cone{radius,height,radialSegments} sphere{radius,widthSegments,heightSegments}
   torus{radius,tube,radialSegments,tubularSegments} plane{width,height,segments} capsule{radius,length,capSegments,radialSegments}
-  lathe{segments} + profile [[radius,height],…] revolved around Y — use for vases, hulls (rotate afterwards), bottles, bowls, lamp shades.
-  extrude{depth,segments} + profile [[x,y],…] closed outline in XY, extruded along Z (centred) — use for paddle blades, brackets, roofs, letters, any flat shape with thickness.
-Precision: a "subdivide" modifier {levels:1-2} smooths a coarse cage into a curved surface — a 6-point lathe
-profile + subdivide 1 gives a smooth hull; a box with segments 2 + subdivide 2 gives a rounded pebble.
-Prefer lathe/extrude + subdivide over stretched spheres and cylinders whenever the real object is curved or flat-profiled.
-Keep tessellation proportional to the fidelity hint; a downstream geometry optimizer will weld,
-clean, decimate flat areas and fix UVs, so prefer clean, slightly over-built geometry over clever tricks.
-Colours are hex strings. Never place parts below y=0.
-Orientation: cylinders, cones and capsules are built along the +Y axis; the torus ring lies in the XY plane;
-planes face +Z. To lay a cylinder along Z use rotation [90,0,0]; along X use [0,0,90]. A boat hull, log or
-pipe that runs along Z therefore needs a rotated primitive, not an upright one. Double-check every part's
-rotation against the role it plays before answering.
+  lathe{segments} + profile [[radius,height],…] revolved around Y — vases, nozzles, domes, bells, hull noses.
+  extrude{depth,segments,bevel} + profile [[x,y],…] closed outline in XY extruded along Z (centred) — wings, fins, brackets, plates, blades.
+  loft{roundness 0-1,sides} + profile [[z,width,height,yOffset],…] cross-section stations back→front — THE hull primitive:
+      fuselages, boat hulls, car bodies, engine nacelles. 4–8 stations give a real silhouette (narrow nose, wide mid, tapered tail).
+  tube{radius,segments,radialSegments} + profile [[x,y,z],…] path — pipes, cables, conduits, railings, roll cages.
+
+MODIFIERS (applied in order, in the part's local space before its transform)
+  taper{factor} twist{angle} bend{angle} noise{amplitude,frequency} mirror{axis} array{count,offset[x,y,z]} subdivide{levels 1-2}
+  greeble{count,minSize,maxSize,height,faces,shape,seed,pattern,cell} — scatters small boxes/cylinders ON the surface, aligned to it.
+      sizes are fractions of the part's bounding diagonal (0.02–0.12). faces: all|top|bottom|sides|front|back. pattern "grid" aligns them.
+  plating{cell,inset,height,faces,jitter} — raised panels on a grid over the surface; the gaps read as panel lines. cell 0.1–0.3.
+  radial{count,axis,angle} — N copies rotated around an axis: thruster rings, bolt circles, turbine blades, spokes.
+
+ORIENTATION: cylinders/cones/capsules/lathes are built along +Y; torus rings lie in XY; planes face +Z; loft/tube run along their
+profile. To lay a cylinder along Z use rotation [90,0,0]; along X use [0,0,90]. Double-check every part's rotation against its role.
+
+HOW PROFESSIONALS BUILD DETAILED HARD-SURFACE MODELS (follow this)
+  1. Primary forms first: 2–5 large parts that define the silhouette. Use loft for any hull/fuselage, extrude for wings/fins/plates,
+     lathe for nozzles/domes. The model must read correctly from 10 m away with ONLY these parts.
+  2. Secondary forms break up big surfaces: plating on hulls and wings, inset panels, engine housings, cockpit canopy, landing gear
+     bays, antenna masts, weapon mounts, intakes — each a real part with its own role, 0.1–0.4 of the primary's size.
+  3. Tertiary detail = greebles, pipes, vents, lights, bolts, rivets, small cylinders in clusters. Put them where machinery belongs
+     (around engines, under panels, along seams), NOT uniformly everywhere. A few larger "hero" greebles anchor each cluster.
+  4. Place by orientation: engines/thrusters at the rear with lathe nozzles + emissive glow discs; sensors/antennas/cockpit on top;
+     weapons, intakes, landing gear on sides/bottom; windows in horizontal rows.
+  5. Symmetry: build one side and mirror{axis:"x"} where the real object is symmetric; break it with one or two asymmetric parts.
+  6. Materials: greebles/plating use the SAME colour as the hull beneath (slightly different roughness); trim, pipes and nozzles use
+     a darker or metallic contrast; lights and engine glow use emissive (emissive "#ff8a3d", emissiveIntensity 2–4) on small parts.
+  7. Scale discipline: every part's size is consistent with the overall object (a 12 m spaceship has 0.2–0.6 m greebles, 1–2 m
+     engines). Nothing floats: parts overlap their neighbours by a few cm. Nothing below y=0.
+  8. Tessellation: curved hero parts 32–48 segments; tiny parts 6–8. Prefer loft/lathe/extrude + subdivide over stretched spheres.
 Be concise: keep "reasoning" to one or two sentences and omit params a primitive type does not use.`;
 
 const FIDELITY = {
-  low: "Low tessellation: radialSegments 8-12, sphere segments 8-10, box segments 1.",
+  low: "Low tessellation: radialSegments 8-12, sphere segments 8-10, box segments 1. Light greebling.",
   medium: "Medium tessellation: radialSegments 16-24, sphere segments 16-24, box segments 1-2.",
-  high: "High tessellation: radialSegments 32-48, sphere segments 32-48, box segments 2-4 where curved modifiers are used.",
+  high: "High tessellation: radialSegments 32-48, loft sides 32-48, box segments 2-4 where curved modifiers are used. Dense secondary and tertiary detail.",
 };
 const STYLE = {
   blocky: "Style: blocky, chunky silhouettes, few parts, strong readable shapes.",
   smooth: "Style: smooth, rounded, use capsules/spheres and taper, avoid harsh corners.",
-  detailed: "Style: detailed, add secondary elements (trim, bolts, panels) as small parts.",
+  detailed: "Style: highly detailed production hard-surface — full primary/secondary/tertiary hierarchy, plating and greebles where machinery belongs, pipes, emissive lights.",
 };
 
 // `image` may be a single {mediaType,data} or an array of them (multi-view review).
@@ -59,7 +78,10 @@ function userContent(text, image) {
 // `grammar: false` skips the server-side constrained decoding (whose compiler
 // rejects schemas with many optional fields as "too complex") and instead puts
 // the JSON schema in the prompt — zod validation below is the real guarantee.
-async function structured(schema, text, image, { effort = "low", maxTokens = 32000, grammar = true } = {}) {
+// grammar defaults to false: server-side constrained decoding compiles a grammar per
+// schema, and for these nested/optional-heavy schemas that takes minutes (or fails
+// with "Schema is too complex"). Prompted JSON + zod validation is fast and reliable.
+async function structured(schema, text, image, { effort = "low", maxTokens = 32000, grammar = false } = {}) {
   const format = zodOutputFormat(schema);
   const prompt = grammar ? text : `${text}\n\nRespond with ONLY a JSON object (no prose, no code fence) matching this JSON schema:\n${JSON.stringify(format.schema)}`;
   const res = await client.messages
@@ -122,6 +144,22 @@ ${JSON.stringify(scene, null, 0)}
 Request: ${prompt}`, image, { grammar: false });
   },
 
+  // Detail pass: secondary + tertiary forms for one component whose primary forms already exist.
+  async detail({ prompt, component, plan, parts, hints }) {
+    return structured(DetailResult, `You are the DETAIL agent for one component of a larger object. Its primary forms already exist (below).
+Add the secondary and tertiary detail a production artist would: plating/greebles on large surfaces (same colour as the surface),
+pipes (tube) and conduits between elements, vents, hatches, bolts/rivets (radial or array), emissive lights where lights belong,
+trim and housings. Follow the hierarchy-of-detail rules. Every new part must sit ON or overlap an existing part of this component
+(nothing floating), inside its region, scaled to it. Return 4–14 new parts named "${component.name}: <detail>"; do NOT repeat the
+existing parts.
+Object: ${plan.summary} (overall height ≈ ${plan.overallHeight} m)
+Component: ${component.name} — ${component.role}
+Region: center ${JSON.stringify(component.region.center)}, size ${JSON.stringify(component.region.size)}
+Existing parts: ${JSON.stringify(parts)}
+${FIDELITY[hints?.tessellation] ?? FIDELITY.medium}
+Original request: ${prompt}`, null, { effort: "low", maxTokens: 24000 });
+  },
+
   // Visual self-review: rendered views of the current model + the original request.
   async review({ prompt, views, scene, round, reference }) {
     const images = [...(reference ? [{ ...reference, label: "User's reference image:" }] : []), ...views.map((v) => ({ ...v, label: `Rendered view — ${v.name}:` }))];
@@ -139,7 +177,7 @@ ${JSON.stringify(scene)}`, images, { grammar: false, effort: "medium" });
 const server = http.createServer(async (req, res) => {
   const send = (code, body) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
   if (req.method === "GET" && req.url === "/api/health") return send(200, { ok: true, model: MODEL });
-  const m = req.url?.match(/^\/api\/(plan|component|edit|review)$/);
+  const m = req.url?.match(/^\/api\/(plan|component|edit|review|detail)$/);
   if (!m || req.method !== "POST") return send(404, { error: "not found" });
   let body = "";
   req.on("data", (c) => { body += c; if (body.length > 30e6) req.destroy(); });

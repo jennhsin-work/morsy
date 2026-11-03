@@ -11,12 +11,13 @@
 
 import * as THREE from "three";
 import { loopSubdivide } from "./geometry/subdivide.js";
+import { loftGeometry, tubeGeometry, greeble, plating, radialArray } from "./geometry/detail.js";
 
 let nextId = 1;
 export const uid = (prefix = "part") => `${prefix}_${(nextId++).toString(36)}${Date.now().toString(36).slice(-3)}`;
 
-export const PRIMITIVES = ["box", "cylinder", "sphere", "cone", "torus", "plane", "capsule", "lathe", "extrude"];
-export const MODIFIERS = ["taper", "twist", "bend", "noise", "mirror", "array", "subdivide"];
+export const PRIMITIVES = ["box", "cylinder", "sphere", "cone", "torus", "plane", "capsule", "lathe", "extrude", "loft", "tube"];
+export const MODIFIERS = ["taper", "twist", "bend", "noise", "mirror", "array", "subdivide", "greeble", "plating", "radial"];
 
 export const identityTransform = () => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
 
@@ -31,7 +32,7 @@ export function defaultPart(overrides = {}) {
     name: "Part",
     primitive: { type: "box", params: { width: 1, height: 1, depth: 1, segments: 1 } },
     transform: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-    material: { color: "#9aa4b5", roughness: 0.7, metalness: 0.05 },
+    material: { color: "#9aa4b5", roughness: 0.7, metalness: 0.05, emissive: "#000000", emissiveIntensity: 0 },
     modifiers: [],
     meta: { agent: null, strategy: null },
     ...overrides,
@@ -168,7 +169,9 @@ export function primitiveDefaults(type) {
     case "plane": return { width: 1, height: 1, segments: 1 };
     case "capsule": return { radius: 0.3, length: 1, capSegments: 6, radialSegments: 16 };
     case "lathe": return { segments: 32 };
-    case "extrude": return { depth: 1, segments: 1 };
+    case "extrude": return { depth: 1, segments: 1, bevel: 0 };
+    case "loft": return { roundness: 0.35, sides: 24 };
+    case "tube": return { radius: 0.05, segments: 32, radialSegments: 10 };
     default: return {};
   }
 }
@@ -176,6 +179,10 @@ export function primitiveDefaults(type) {
 export const DEFAULT_PROFILE = {
   lathe: [[0, 0], [0.5, 0], [0.55, 0.3], [0.4, 0.7], [0.45, 1], [0.3, 1.05], [0, 1.05]],
   extrude: [[-0.5, 0], [0.5, 0], [0.5, 0.6], [0, 1], [-0.5, 0.6]],
+  // loft stations: [z, width, height, yOffset] back → front
+  loft: [[-1.5, 0.6, 0.5, 0], [-0.8, 1.0, 0.7, 0.05], [0.2, 1.1, 0.6, 0.1], [1.0, 0.7, 0.4, 0.15], [1.6, 0.25, 0.2, 0.2]],
+  // tube path points
+  tube: [[-0.5, 0, 0], [-0.2, 0.3, 0], [0.2, 0.3, 0.1], [0.5, 0, 0.1]],
 };
 
 // ---- Transform math ---------------------------------------------------------
@@ -218,20 +225,23 @@ export function buildGeometry(part) {
     case "extrude": {
       const pts = profilePoints(part.primitive.profile, DEFAULT_PROFILE.extrude).map(([x, y]) => new THREE.Vector2(x, y));
       const shape = new THREE.Shape(pts);
-      g = new THREE.ExtrudeGeometry(shape, { depth: num(p.depth, 1), bevelEnabled: false, steps: seg });
+      const bevel = Math.max(0, num(p.bevel, 0));
+      g = new THREE.ExtrudeGeometry(shape, { depth: num(p.depth, 1), bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, steps: seg });
       g.translate(0, 0, -num(p.depth, 1) / 2); break; // centre on Z like the other primitives
     }
+    case "loft": g = loftGeometry(profilePoints(part.primitive.profile, DEFAULT_PROFILE.loft, 3), { roundness: num(p.roundness, 0.35), sides: clampInt(p.sides, 4, 64) }); break;
+    case "tube": g = tubeGeometry(profilePoints(part.primitive.profile, DEFAULT_PROFILE.tube, 3), { radius: num(p.radius, 0.05), segments: clampInt(p.segments, 2, 128), radialSegments: clampInt(p.radialSegments, 3, 32) }); break;
     default: g = new THREE.BoxGeometry(1, 1, 1);
   }
-  g = g.toNonIndexed();
+  if (g.index) g = g.toNonIndexed();
   for (const m of part.modifiers) applyModifier(g, m);
   g.computeVertexNormals();
   return g;
 }
 
-function profilePoints(profile, fallback) {
-  const pts = (Array.isArray(profile) ? profile : fallback).filter((q) => Array.isArray(q) && q.length >= 2 && Number.isFinite(+q[0]) && Number.isFinite(+q[1])).map((q) => [+q[0], +q[1]]);
-  return pts.length >= 3 ? pts : fallback;
+function profilePoints(profile, fallback, arity = 2) {
+  const pts = (Array.isArray(profile) ? profile : fallback).filter((q) => Array.isArray(q) && q.length >= arity && q.slice(0, arity).every((x) => Number.isFinite(+x))).map((q) => q.map((x) => +x));
+  return pts.length >= (arity === 2 ? 3 : 2) ? pts : fallback;
 }
 
 const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number.isFinite(+v) ? +v : lo)));
@@ -264,6 +274,15 @@ function applyModifier(g, m) {
       const copies = []; for (let k = 1; k < count; k++) { const c = g.clone(); c.translate(off[0] * k, off[1] * k, off[2] * k); copies.push(c); }
       mergeInto(g, copies); break;
     }
+    case "greeble": {
+      mergeInto(g, greeble(g, { count: clampInt(m.count, 1, 400), minSize: num(m.minSize, 0.03), maxSize: num(m.maxSize, 0.1), height: num(m.height, 0.5), faces: m.faces ?? "all", shape: m.shape === "cylinder" ? "cylinder" : "box", seed: clampInt(m.seed, 1, 1e6), pattern: m.pattern === "grid" ? "grid" : "random", cell: num(m.cell, 0.12) }));
+      return;
+    }
+    case "plating": {
+      mergeInto(g, plating(g, { cell: num(m.cell, 0.18), inset: num(m.inset, 0.12), height: num(m.height, 0.02), faces: m.faces ?? "all", seed: clampInt(m.seed, 1, 1e6), jitter: num(m.jitter, 0.3) }));
+      return;
+    }
+    case "radial": { mergeInto(g, radialArray(g, { count: clampInt(m.count, 1, 64), axis: ["x", "y", "z"].includes(m.axis) ? m.axis : "y", startAngle: num(m.angle, 0) })); return; }
     case "subdivide": {
       const { positions, uvs } = loopSubdivide(pos.array, g.attributes.uv?.array ?? null, clampInt(m.levels, 1, 3));
       g.setAttribute("position", new THREE.BufferAttribute(positions, 3));

@@ -28,6 +28,7 @@ const viewport = new Viewport($("#viewport"), doc, {
   onSelect: (selection, live) => renderSelection(selection, live),
   onStats: ({ components, parts, tris, verts }) => { $("#hud-stats").innerHTML = `Components: ${components}<br>Parts: ${parts}<br>Tris: ${tris.toLocaleString()}<br>Verts: ${verts.toLocaleString()}`; },
   helperEl: $("#view-helper"),
+  onHover: (h) => { const el = $("#hud-hover"); if (!h) { el.hidden = true; return; } el.hidden = false; const r = $("#viewport").getBoundingClientRect(); el.style.left = `${h.x - r.left + 14}px`; el.style.top = `${h.y - r.top + 14}px`; el.innerHTML = h.level === "component" ? `<b>${esc(h.component)}</b><span>click to select · click again for <i>${esc(h.part)}</i></span>` : `<b>${esc(h.part)}</b><span>in ${esc(h.component)} · click to select</span>`; },
 });
 const trajectory = new TrajectoryStore();
 const orchestrator = new Orchestrator({ doc, policy, optimizer, buildGeometry, log, trajectory, captureViews: () => viewport.captureViews() });
@@ -136,7 +137,7 @@ const commands = {
   "shade-wire": () => setShading("wire"), "shade-smooth": () => setShading("smooth"), "shade-uv": () => setShading("uv"),
   "toggle-grid": () => { const on = viewport.toggleGrid(); $$('[data-cmd="toggle-grid"]').forEach((b) => b.classList.toggle("active", on)); },
   "frame-all": () => viewport.frameAll(), "frame-sel": () => viewport.frameSelected(),
-  "dock-channel": () => showDock("channel"), "dock-attr": () => showDock("attr"), "dock-agents": () => showDock("agents"),
+  "dock-channel": () => showDock("inspector"), "dock-attr": () => showDock("inspector"), "dock-agents": () => showDock("agents"),
   "dock-dev": () => { $('#right-dock [data-dock="dev"]').classList.remove("hidden"); showDock("dev"); },
   help: () => alert(`Morsy hotkeys\n\nQ W E R  select / move / rotate / scale\n4 5 6     wireframe / shaded / UV stress\nF / A     frame selected / all\n↑         select parent component\nG         toggle grid\nX         snap toggle\n⌘Z ⇧⌘Z   undo / redo\n⌘D        duplicate\n⌫         delete\nEnter     focus the command line\n\nClick: select component · click again / double-click: select part\nAlt+LMB orbit · Alt+MMB pan · Alt+RMB / wheel zoom · Space: persp view`),
 };
@@ -152,7 +153,7 @@ for (const m of $$(".menu")) {
 document.addEventListener("click", closeMenus);
 
 // Create menu + shelf
-const PRIM_LABEL = { box: "Cube", cylinder: "Cylinder", sphere: "Sphere", cone: "Cone", torus: "Torus", plane: "Plane", capsule: "Capsule", lathe: "Lathe", extrude: "Extrude" };
+const PRIM_LABEL = { box: "Cube", cylinder: "Cylinder", sphere: "Sphere", cone: "Cone", torus: "Torus", plane: "Plane", capsule: "Capsule", lathe: "Lathe", extrude: "Extrude", loft: "Loft hull", tube: "Tube" };
 const PRIM_ICON = {
   box: `<svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></svg>`,
   cylinder: `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/></svg>`,
@@ -163,6 +164,8 @@ const PRIM_ICON = {
   capsule: `<svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="5"/></svg>`,
   lathe: `<svg viewBox="0 0 24 24"><path d="M9 3c4 0 6 2 6 5s-3 4-3 7 3 3 3 6H9c0-3 3-3 3-6S9 11 9 8s2-5 0-5z"/><path d="M12 3v18" stroke-dasharray="2 2"/></svg>`,
   extrude: `<svg viewBox="0 0 24 24"><path d="M4 16l4-4h8l-4 4z"/><path d="M4 16v4l4-4M16 12v4l-4 4v-4M8 12V8h8v4"/></svg>`,
+  loft: `<svg viewBox="0 0 24 24"><path d="M3 12c0-2 2-4 5-4h9l4 4-4 4H8c-3 0-5-2-5-4z"/><path d="M8 8v8M13 8v8"/></svg>`,
+  tube: `<svg viewBox="0 0 24 24"><path d="M3 17c4 0 4-10 9-10s5 10 9 10"/><path d="M3 14c4 0 4-10 9-10s5 10 9 10" opacity=".5"/></svg>`,
 };
 const createMenu = $("#create-menu");
 for (const t of PRIMITIVES) { const b = document.createElement("button"); b.textContent = `Polygon ${PRIM_LABEL[t]}`; b.onclick = () => createPrimitive(t); createMenu.appendChild(b); }
@@ -188,7 +191,7 @@ const SHELVES = {
     { label: "✎ Edit", title: "Change the current model from a text prompt", run: () => { showDock("agents"); setAiMode("edit"); $("#prompt").focus(); } },
   ],
 };
-const MOD_DEFAULT = { taper: { factor: 0.5 }, twist: { angle: 45 }, bend: { angle: 30 }, noise: { amplitude: 0.05, frequency: 3 }, mirror: { axis: "x" }, array: { count: 3, offset: [1.2, 0, 0] }, subdivide: { levels: 1 } };
+const MOD_DEFAULT = { taper: { factor: 0.5 }, twist: { angle: 45 }, bend: { angle: 30 }, noise: { amplitude: 0.05, frequency: 3 }, mirror: { axis: "x" }, array: { count: 3, offset: [1.2, 0, 0] }, subdivide: { levels: 1 }, greeble: { count: 40, minSize: 0.03, maxSize: 0.08, height: 0.5, faces: "all", seed: 1 }, plating: { cell: 0.18, inset: 0.12, height: 0.02, faces: "all" }, radial: { count: 6, axis: "y" } };
 function addModifier(type) { const p = selPart(); if (!p) { cmdResult("Select a part first (click a component, then click again to pick the part)", true); return; } doc.applyOps([{ op: "update", id: p.id, patch: { modifiers: [...p.modifiers, { type, ...MOD_DEFAULT[type] }], optimized: null } }]); showDock("attr"); }
 function renderShelf(name) {
   $$(".shelf-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.shelf === name));
@@ -209,12 +212,13 @@ $$("#toolbox [data-layout]").forEach((b) => (b.onclick = () => { $$("#toolbox [d
 $("#snap-grid").onchange = (e) => viewport.setSnap(e.target.checked);
 $("#select-mode").onchange = (e) => { viewport.setSelectMode(e.target.value); help(e.target.value === "component" ? "Component mode: a click selects the whole component (the boat, an oar). Click again to drill into a part." : "Part mode: a click selects the individual part under the cursor."); };
 function setShading(mode) { viewport.setShading(mode); $$(".panel-icons [data-cmd^='shade-']").forEach((b) => b.classList.toggle("active", b.dataset.cmd === `shade-${mode}`)); }
-$("#mode-select").onchange = (e) => { if (e.target.value === "AI") $("#prompt").focus(); else showDock("channel"); };
+$("#mode-select").onchange = (e) => { if (e.target.value === "AI") $("#prompt").focus(); else showDock("inspector"); };
 
 // editing dock tabs (Channel Box / Attribute Editor / Developer). The AI panel has
 // its own dock and is always visible, so "agents" just scrolls it into view.
 function showDock(name) {
   if (name === "agents") { $("#ai-dock").scrollIntoView({ block: "nearest" }); return; }
+  if (name === "channel" || name === "attr") name = "inspector";
   $$("#right-dock .dock-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.dock === name));
   $$("#right-dock [data-dock-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.dockPanel !== name));
 }
@@ -290,11 +294,11 @@ function renderChannelBox(s, live) {
   const t = live && obj ? { position: obj.position.toArray(), rotation: obj.rotation.toArray().slice(0, 3).map((r) => (r * 180) / Math.PI), scale: obj.scale.toArray() } : node.transform;
   const row = (label, cls, path, v, step = 0.01) => `<div class="cb-row"><label class="${cls}">${label}</label><input type="number" step="${step}" data-path="${path}" value="${+(+v).toFixed(3)}"></div>`;
   const xyz = (name, key, arr) => ["X", "Y", "Z"].map((ax, i) => row(`${name} ${ax}`, ax.toLowerCase(), `transform.${key}.${i}`, arr[i], key === "rotation" ? 1 : 0.01)).join("");
-  let html = `<div class="cb-name">${esc(node.name)} <span class="muted">(${s.type}${extra ? ` +${extra} more` : ""})</span></div>${xyz("Translate", "position", t.position)}${xyz("Rotate", "rotation", t.rotation)}${xyz("Scale", "scale", t.scale)}
+  let html = `<div class="cb-name">${esc(node.name)} <span class="muted">(${s.type}${extra ? ` +${extra} more` : ""})</span></div><div class="cb-title">TRANSFORM</div>${xyz("Translate", "position", t.position)}${xyz("Rotate", "rotation", t.rotation)}${xyz("Scale", "scale", t.scale)}
     <div class="cb-row"><label>Visibility</label><input type="number" step="1" min="0" max="1" data-path="visible" value="${node.visible === false ? 0 : 1}"></div>`;
   if (s.type === "part") {
     const params = Object.keys(primitiveDefaults(node.primitive.type)).map((k) => row(k, "", `primitive.params.${k}`, node.primitive.params[k] ?? 0, /segments/i.test(k) ? 1 : 0.01)).join("");
-    html += `<div class="cb-title">INPUTS</div><div class="cb-name">${esc(node.primitive.type)}Shape</div>${params}`;
+    html += `<div class="cb-title">SHAPE · ${esc(node.primitive.type)}</div>${params}`;
   } else {
     const parts = doc.partsOf(node.id);
     html += `<div class="cb-title">CHILDREN</div>${parts.map((p) => `<div class="cb-row cb-link" data-part="${p.id}"><label>${esc(p.name.replace(node.name + ":", "").trim())}</label><span class="muted">${p.primitive.type}</span></div>`).join("")}`;
@@ -305,10 +309,10 @@ function renderChannelBox(s, live) {
 }
 function renderAttributeEditor(s) {
   const el = $("#properties");
-  if (!s) { el.innerHTML = sceneOverview("attr"); bindOverview(el); return; }
+  if (!s) { el.innerHTML = ""; return; }
   if (s.type === "component") {
     const c = doc.getComponent(s.id); if (!c) return;
-    el.innerHTML = `<div class="section">${esc(c.name)} <span class="muted">component</span></div>
+    el.innerHTML = `<div class="section">Component</div>
       <label>name<input data-path="name" value="${esc(c.name)}"></label>
       <label>role<span class="muted">${esc(c.meta?.role || "–")}</span></label>
       <label>modeled by<span>${esc(c.meta?.agent ?? "you")}</span></label>
@@ -317,16 +321,18 @@ function renderAttributeEditor(s) {
     bindInputs(el, s, c); return;
   }
   const p = doc.get(s.id); if (!p) return;
-  const hasProfile = p.primitive.type === "lathe" || p.primitive.type === "extrude";
+  const hasProfile = ["lathe", "extrude", "loft", "tube"].includes(p.primitive.type);
   el.innerHTML = `
-    <div class="section">${esc(p.name)} <span class="muted">part of ${esc(doc.componentOf(p.id)?.name ?? "")}</span></div>
+    <div class="section">Part <span class="muted">of ${esc(doc.componentOf(p.id)?.name ?? "")}</span></div>
     <label>name<input data-path="name" value="${esc(p.name)}"></label>
     <label>type<select data-path="primitive.type">${PRIMITIVES.map((t) => `<option ${t === p.primitive.type ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-    ${hasProfile ? `<label>profile<input data-path="primitive.profile" value='${esc(JSON.stringify(p.primitive.profile ?? DEFAULT_PROFILE[p.primitive.type]))}' title="${p.primitive.type === "lathe" ? "[[radius, height], …] revolved around Y" : "[[x, y], …] outline, extruded along Z"}"></label>` : ""}
+    ${hasProfile ? `<label>profile<input data-path="primitive.profile" value='${esc(JSON.stringify(p.primitive.profile ?? DEFAULT_PROFILE[p.primitive.type]))}' title="${{ lathe: "[[radius, height], …] revolved around Y", extrude: "[[x, y], …] outline, extruded along Z", loft: "[[z, width, height, yOffset], …] stations back → front", tube: "[[x, y, z], …] path points" }[p.primitive.type]}"></label>` : ""}
     <div class="section">Material</div>
     <label>color<input type="color" data-path="material.color" value="${p.material.color}"></label>
     <label>roughness<input type="range" min="0" max="1" step="0.05" data-path="material.roughness" value="${p.material.roughness}"></label>
     <label>metalness<input type="range" min="0" max="1" step="0.05" data-path="material.metalness" value="${p.material.metalness}"></label>
+    <label>glow<input type="color" data-path="material.emissive" value="${p.material.emissive ?? "#000000"}"></label>
+    <label>glow power<input type="range" min="0" max="4" step="0.1" data-path="material.emissiveIntensity" value="${p.material.emissiveIntensity ?? 0}"></label>
     <div class="section">Modifiers</div>
     <label>stack<input data-path="modifiers" value='${esc(JSON.stringify(p.modifiers))}' title="JSON array, e.g. [{&quot;type&quot;:&quot;subdivide&quot;,&quot;levels&quot;:2}]"></label>
     <div class="section">Agent</div>
@@ -341,7 +347,7 @@ function sceneOverview(kind) {
   const comps = doc.listComponents();
   if (!comps.length) return `<div class="empty"><b>Empty scene</b><p>Describe something in the AI panel and press Generate, or add a primitive from the shelf above.</p></div>`;
   const rows = comps.map((c) => `<div class="cb-row cb-link" data-comp="${c.id}"><label>${esc(c.name)}</label><span class="muted">${doc.partsOf(c.id).length} part${doc.partsOf(c.id).length === 1 ? "" : "s"}</span></div>`).join("");
-  return `<div class="empty"><b>Nothing selected</b><p>Click any part of the model in the viewport, or pick a component below. ${kind === "channel" ? "Translate / Rotate / Scale and the shape inputs appear here." : "Name, material and modifiers appear here."}</p></div>
+  return `<div class="empty"><b>Nothing selected</b><p>Click any part of the model in the viewport, or pick a component below. Transform, shape, material and modifiers appear here.</p></div>
     <div class="cb-title">SCENE · ${comps.length} components · ${doc.parts.size} parts</div>${rows}
     <div class="row" style="margin-top:8px"><button data-cmd="select-all">Select all</button><button data-cmd="frame-all">Frame all</button></div>`;
 }
@@ -562,6 +568,6 @@ renderTrajectory();
 renderOutliner(); renderSelection(null);
 setTool("select");
 setAiMode("create");
-showDock("channel");
+showDock("inspector");
 if (doc.parts.size) { viewport.frameAll(); log(`restored ${doc.components.size} component(s), ${doc.parts.size} part(s) from the last session`); }
 log("Morsy ready. Type a request in the command line below, or pick a primitive from the shelf.");

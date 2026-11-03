@@ -12,8 +12,8 @@ import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
 import { buildGeometry } from "./scene-model.js";
 
 export class Viewport {
-  constructor(container, doc, { onSelect, onStats, helperEl }) {
-    this.container = container; this.doc = doc; this.onSelect = onSelect; this.onStats = onStats;
+  constructor(container, doc, { onSelect, onStats, onHover, helperEl }) {
+    this.container = container; this.doc = doc; this.onSelect = onSelect; this.onStats = onStats; this.onHover = onHover;
     this.meshes = new Map(); this.groups = new Map();
     this.selection = null; // primary { type: "component"|"part", id }
     this.extra = [];       // additional selections (Shift+click), same shape
@@ -155,9 +155,11 @@ export class Viewport {
   onHover(e) {
     if (this.down || this.gizmo.dragging) return;
     const hit = this.pick(e);
-    if (!hit) { this.hoverBox.visible = false; this.container.style.cursor = ""; return; }
-    const obj = this.selectMode === "component" ? this.groups.get(this.doc.get(hit.userData.id)?.componentId) : hit;
+    if (!hit) { this.hoverBox.visible = false; this.container.style.cursor = ""; this.onHover?.(null); return; }
+    const part = this.doc.get(hit.userData.id); const comp = part && this.doc.getComponent(part.componentId);
+    const obj = this.selectMode === "component" ? this.groups.get(part?.componentId) : hit;
     if (obj) { this.hoverBox.box.setFromObject(obj, true); this.hoverBox.visible = true; this.container.style.cursor = "pointer"; }
+    this.onHover?.({ component: comp?.name ?? "", part: part?.name.replace(/^.*?:\s*/, "") ?? "", x: e.clientX, y: e.clientY, level: this.selectMode === "component" && !(this.selection && (this.selection.id === part?.componentId || this.doc.get(this.selection.id)?.componentId === part?.componentId)) ? "component" : "part" });
   }
 
   selectedObject() {
@@ -208,6 +210,8 @@ export class Viewport {
     if (this.shading === "uv") { mesh.material = this.uvMaterial; mesh.userData.ownMat = false; return; }
     const selected = this.isSelected(part); const strong = selected && this.selection?.type === "part";
     const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(part.material.color || "#999"), roughness: part.material.roughness ?? 0.7, metalness: part.material.metalness ?? 0.05, wireframe: this.shading === "wire", side: THREE.DoubleSide });
+    // Emissive (engine glow, lights) comes from the part; selection tint is layered on top.
+    if (part.material.emissiveIntensity > 0 && part.material.emissive) { mat.emissive.set(part.material.emissive); mat.emissiveIntensity = part.material.emissiveIntensity; }
     if (selected) { mat.emissive.set(0x3b6f91); mat.emissiveIntensity = strong ? 1 : 0.45; if (this.shading === "wire") mat.color.set(0x80b7e0); }
     else if (this.shading === "wire") mat.color.set(0x9ac8ff);
     if (!part.optimized) { mat.transparent = true; mat.opacity = 0.85; } // placeholder until the optimizer delivers

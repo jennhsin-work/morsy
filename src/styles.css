@@ -164,7 +164,8 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 3px 0; }
 .props input, .props select { width: 100%; background: var(--bg-field); color: var(--text); border: 1px solid var(--border); border-radius: 2px; padding: 2px 5px; }
 .props input[type=color] { padding: 0; height: 20px; }
 .props .vec { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
-.props .section { font-weight: 600; color: var(--text-bright); background: var(--bg-3); padding: 3px 6px; margin: 6px -6px 4px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.props .section { font-weight: 600; color: var(--text-bright); background: var(--bg-3); padding: 3px 6px; margin: 6px -6px 4px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+.props:empty { display: none; }
 
 /* ---------- viewport ---------- */
 #viewport { grid-area: view; position: relative; min-width: 0; min-height: 0; background: #3c3c3c; }
@@ -176,6 +177,9 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 3px 0; }
 .panel-icons { display: flex; gap: 1px; }
 .panel-icons button { width: 22px; height: 18px; background: var(--bg-2); border: 1px solid var(--border); font-size: 11px; color: var(--text-dim); padding: 0; }
 .panel-icons button.active { background: var(--sel); color: #fff; }
+#hud-hover { position: absolute; z-index: 6; pointer-events: none; background: rgba(30,30,30,.92); border: 1px solid var(--border-light); border-radius: 3px; padding: 3px 7px; font-size: 11px; color: var(--text); white-space: nowrap; }
+#hud-hover b { color: var(--accent-2); margin-right: 6px; }
+#hud-hover span { color: var(--text-dim); }
 #hud-view { position: absolute; left: 8px; bottom: 6px; color: var(--text-dim); font-size: 11px; pointer-events: none; z-index: 5; }
 #hud-stats { position: absolute; right: 8px; top: 26px; color: var(--text-dim); font-size: 11px; text-align: right; pointer-events: none; z-index: 5; line-height: 1.4; }
 #view-helper { position: absolute; right: 4px; bottom: 4px; width: 110px; height: 110px; z-index: 5; }

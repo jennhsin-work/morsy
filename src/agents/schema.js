@@ -10,19 +10,22 @@ export const Vec3 = z.array(z.number()).min(3).max(3).describe("[x, y, z]");
 // closed object schema. Agents fill only the keys their primitive type uses.
 const n = () => z.number().optional();
 export const Primitive = z.object({
-  type: z.enum(["box", "cylinder", "sphere", "cone", "torus", "plane", "capsule", "lathe", "extrude"]),
+  type: z.enum(["box", "cylinder", "sphere", "cone", "torus", "plane", "capsule", "lathe", "extrude", "loft", "tube"]),
   params: z.object({
     width: n(), height: n(), depth: n(), segments: n(),
     radius: n(), radiusTop: n(), radiusBottom: n(), radialSegments: n(), heightSegments: n(),
     widthSegments: n(), tube: n(), tubularSegments: n(), length: n(), capSegments: n(),
+    bevel: n(), roundness: n(), sides: n(),
   }),
   // lathe: [[radius, height], …] revolved around Y (3–24 points, bottom to top);
-  // extrude: [[x, y], …] closed outline in the XY plane, extruded along Z by params.depth.
-  profile: z.array(z.array(z.number()).min(2).max(2)).min(3).max(24).optional(),
+  // extrude: [[x, y], …] closed outline in the XY plane, extruded along Z by params.depth;
+  // loft: [[z, width, height, yOffset], …] cross-section stations back→front (2–12);
+  // tube: [[x, y, z], …] path points (2–16).
+  profile: z.array(z.array(z.number()).min(2).max(4)).min(2).max(24).optional(),
 });
 
 export const Modifier = z.object({
-  type: z.enum(["taper", "twist", "bend", "noise", "mirror", "array", "subdivide"]),
+  type: z.enum(["taper", "twist", "bend", "noise", "mirror", "array", "subdivide", "greeble", "plating", "radial"]),
   factor: z.number().optional(),
   angle: z.number().optional(),
   amplitude: z.number().optional(),
@@ -31,13 +34,18 @@ export const Modifier = z.object({
   count: z.number().optional(),
   offset: Vec3.optional(),
   levels: z.number().optional().describe("subdivide: 1–3 Loop subdivision levels"),
+  // greeble / plating
+  minSize: z.number().optional(), maxSize: z.number().optional(), height: z.number().optional(),
+  faces: z.enum(["all", "top", "bottom", "sides", "front", "back"]).optional(),
+  shape: z.enum(["box", "cylinder"]).optional(), seed: z.number().optional(),
+  pattern: z.enum(["random", "grid"]).optional(), cell: z.number().optional(), inset: z.number().optional(), jitter: z.number().optional(),
 });
 
 export const PartSpec = z.object({
   name: z.string(),
   primitive: Primitive,
   transform: z.object({ position: Vec3, rotation: Vec3, scale: Vec3 }),
-  material: z.object({ color: z.string(), roughness: z.number(), metalness: z.number() }),
+  material: z.object({ color: z.string(), roughness: z.number(), metalness: z.number(), emissive: z.string().optional(), emissiveIntensity: z.number().optional() }),
   modifiers: z.array(Modifier),
 });
 
@@ -50,13 +58,19 @@ export const Plan = z.object({
     role: z.string().describe("what this component is, e.g. 'seat', 'rear left leg'"),
     region: z.object({ center: Vec3, size: Vec3 }).describe("bounding region in world space the component should occupy"),
     notes: z.string().describe("modeling guidance for the component agent"),
-  })).min(1).max(12),
+  })).min(1).max(16),
 });
 
 // Component agent output: parts for one component, or edits to existing parts.
 export const ComponentResult = z.object({
   reasoning: z.string().describe("one or two sentences on the modeling decisions"),
-  parts: z.array(PartSpec).max(8),
+  parts: z.array(PartSpec).max(12),
+});
+
+// Detail agent output: secondary/tertiary parts added on top of a component's primary forms.
+export const DetailResult = z.object({
+  reasoning: z.string(),
+  parts: z.array(PartSpec).max(14),
 });
 
 // Edit agent output: targeted changes to existing parts. One flat op shape

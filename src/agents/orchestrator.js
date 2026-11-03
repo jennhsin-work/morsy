@@ -19,8 +19,8 @@ const CLEANUP = {
 };
 
 export class Orchestrator {
-  constructor({ doc, policy, optimizer, buildGeometry, log, trajectory = null, captureViews = null, maxReviewRounds = 2 }) {
-    Object.assign(this, { doc, policy, optimizer, buildGeometry, log, trajectory, captureViews, maxReviewRounds });
+  constructor({ doc, policy, optimizer, buildGeometry, log, trajectory = null, captureViews = null, maxReviewRounds = 2, detailPass = true }) {
+    Object.assign(this, { doc, policy, optimizer, buildGeometry, log, trajectory, captureViews, maxReviewRounds, detailPass });
     this.agents = []; this.listeners = new Set(); this.backendOk = null; this.lastEpisode = null; this.plan = null;
     // Conversational transcript the UI shows: what the agents are doing, in plain words.
     this.transcript = []; this.transcriptListeners = new Set();
@@ -80,6 +80,8 @@ export class Orchestrator {
     const t0 = performance.now();
     const context = contextFor(prompt, !!image);
     const choice = { ...this.policy.choose(context), ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v)) };
+    // A detailed model needs many components and high tessellation; don't let the bandit undercut an explicit ask.
+    if (choice.style === "detailed") { if (!overrides.decomposition) choice.decomposition = "fine"; if (!overrides.tessellation || overrides.tessellation === "low") choice.tessellation = "high"; }
     this.log(`policy[${context}] → ${Object.entries(choice).map(([k, v]) => `${k}=${v}`).join(", ")}`);
     await this.checkBackend();
     const useLLM = this.backendOk;
@@ -195,6 +197,21 @@ export class Orchestrator {
     const component = normaliseComponent({ name: comp.name, meta: { agent: a.name, role: comp.role, region: comp.region } });
     const normalised = parts.map((spec) => normalisePart({ ...spec, componentId: component.id, meta: { agent: a.name, strategy: choice } }));
     this.commit([{ op: "addComponent", component }, ...normalised.map((part) => ({ op: "add", part }))], { agent: a.name, intent: `model component "${comp.name}" (${comp.role})`, result: { reasoning, parts: normalised.map((p) => p.name) }, error, ms: Math.round(performance.now() - t) });
+    // 1b. Detail pass: a second agent adds secondary/tertiary forms on top of the
+    //     primary parts (plating, greebles, pipes, lights), committed as they arrive.
+    if (useLLM && this.detailPass) {
+      this.set(a, { detail: "adding detail…", progress: 0.55 });
+      try {
+        const existing = normalised.map(({ name, primitive, transform, material }) => ({ name, type: primitive.type, transform, color: material.color }));
+        const res = await this.call("detail", { prompt, component: comp, plan, parts: existing, hints: choice });
+        const extra = (res.parts ?? []).map((spec) => normalisePart({ ...spec, componentId: component.id, meta: { agent: `${a.name} (detail)`, strategy: choice } }));
+        if (extra.length) {
+          this.commit(extra.map((part) => ({ op: "add", part })), { agent: `${a.name} (detail)`, intent: `detail component "${comp.name}"`, result: { reasoning: res.reasoning, parts: extra.map((p) => p.name) }, ms: Math.round(performance.now() - t) });
+          normalised.push(...extra);
+          this.say(`Detailed ${comp.name.replace(/_/g, " ")} — +${extra.length} part${extra.length === 1 ? "" : "s"}.`, { detail: res.reasoning });
+        }
+      } catch (err) { this.log(`${comp.name} detail: ${err.message}`); this.say(`Detail pass for ${comp.name.replace(/_/g, " ")} skipped (${err.message}).`, { kind: "warn" }); }
+    }
     // 2. Optimize each part in a worker; swap in results as they land.
     let done = 0;
     await Promise.all(normalised.map(async (part) => {
