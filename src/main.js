@@ -284,7 +284,7 @@ function renderSelection(s, live = false) {
 function renderChannelBox(s, live) {
   const el = $("#channel-box");
   const node = s?.type === "part" ? doc.get(s.id) : s?.type === "component" ? doc.getComponent(s.id) : null;
-  if (!node) { el.innerHTML = `<em class="muted">Nothing selected</em>`; return; }
+  if (!node) { el.innerHTML = sceneOverview("channel"); bindOverview(el); return; }
   const extra = viewport.extra.length;
   const obj = viewport.selectedObject();
   const t = live && obj ? { position: obj.position.toArray(), rotation: obj.rotation.toArray().slice(0, 3).map((r) => (r * 180) / Math.PI), scale: obj.scale.toArray() } : node.transform;
@@ -305,7 +305,7 @@ function renderChannelBox(s, live) {
 }
 function renderAttributeEditor(s) {
   const el = $("#properties");
-  if (!s) { el.innerHTML = `<em class="muted">Nothing selected</em>`; return; }
+  if (!s) { el.innerHTML = sceneOverview("attr"); bindOverview(el); return; }
   if (s.type === "component") {
     const c = doc.getComponent(s.id); if (!c) return;
     el.innerHTML = `<div class="section">${esc(c.name)} <span class="muted">component</span></div>
@@ -335,6 +335,18 @@ function renderAttributeEditor(s) {
     <div class="row"><button data-cmd="optimize-sel">Re-optimize</button><button data-cmd="duplicate">Duplicate</button><button data-cmd="select-parent">↑ Component</button></div>`;
   bindInputs(el, s, p);
 }
+// Inspector with nothing selected: a scene overview that is itself a way in —
+// every row selects that component — plus the one-line instruction.
+function sceneOverview(kind) {
+  const comps = doc.listComponents();
+  if (!comps.length) return `<div class="empty"><b>Empty scene</b><p>Describe something in the AI panel and press Generate, or add a primitive from the shelf above.</p></div>`;
+  const rows = comps.map((c) => `<div class="cb-row cb-link" data-comp="${c.id}"><label>${esc(c.name)}</label><span class="muted">${doc.partsOf(c.id).length} part${doc.partsOf(c.id).length === 1 ? "" : "s"}</span></div>`).join("");
+  return `<div class="empty"><b>Nothing selected</b><p>Click any part of the model in the viewport, or pick a component below. ${kind === "channel" ? "Translate / Rotate / Scale and the shape inputs appear here." : "Name, material and modifiers appear here."}</p></div>
+    <div class="cb-title">SCENE · ${comps.length} components · ${doc.parts.size} parts</div>${rows}
+    <div class="row" style="margin-top:8px"><button data-cmd="select-all">Select all</button><button data-cmd="frame-all">Frame all</button></div>`;
+}
+function bindOverview(el) { el.querySelectorAll("[data-comp]").forEach((r) => (r.onclick = () => { viewport.select({ type: "component", id: r.dataset.comp }); viewport.frameSelected(); })); }
+
 function bindInputs(el, s, node) {
   for (const input of el.querySelectorAll("[data-path]")) input.onchange = () => {
     const path = input.dataset.path.split(".");
@@ -547,7 +559,7 @@ async function resizeImage(file, max) {
 // ---- boot -------------------------------------------------------------------------
 renderPolicy("generic:mid");
 renderTrajectory();
-renderOutliner();
+renderOutliner(); renderSelection(null);
 setTool("select");
 setAiMode("create");
 showDock("channel");
