@@ -177,6 +177,19 @@ ${JSON.stringify(scene)}`, images, { grammar: false, effort: "medium" });
 const server = http.createServer(async (req, res) => {
   const send = (code, body) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
   if (req.method === "GET" && req.url === "/api/health") return send(200, { ok: true, model: MODEL });
+  // Dev helper: the page posts rendered viewport frames here for demo-video capture.
+  if (req.method === "POST" && req.url === "/api/demo-frame") {
+    let body = ""; req.on("data", (c) => { body += c; if (body.length > 40e6) req.destroy(); });
+    req.on("end", async () => {
+      try {
+        const { name, data } = JSON.parse(body); const safe = String(name).replace(/[^a-z0-9_.-]/gi, "_");
+        const { mkdir, writeFile } = await import("node:fs/promises");
+        await mkdir("demo/frames", { recursive: true }); await writeFile(`demo/frames/${safe}`, Buffer.from(data, "base64"));
+        send(200, { ok: true, file: `demo/frames/${safe}` });
+      } catch (err) { send(400, { error: err.message }); }
+    });
+    return;
+  }
   const m = req.url?.match(/^\/api\/(plan|component|edit|review|detail)$/);
   if (!m || req.method !== "POST") return send(404, { error: "not found" });
   let body = "";

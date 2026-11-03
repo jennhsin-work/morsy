@@ -28,7 +28,7 @@ const viewport = new Viewport($("#viewport"), doc, {
   onSelect: (selection, live) => renderSelection(selection, live),
   onStats: ({ components, parts, tris, verts }) => { $("#hud-stats").innerHTML = `Components: ${components}<br>Parts: ${parts}<br>Tris: ${tris.toLocaleString()}<br>Verts: ${verts.toLocaleString()}`; },
   helperEl: $("#view-helper"),
-  onHover: (h) => { const el = $("#hud-hover"); if (!h) { el.hidden = true; return; } el.hidden = false; const r = $("#viewport").getBoundingClientRect(); el.style.left = `${h.x - r.left + 14}px`; el.style.top = `${h.y - r.top + 14}px`; el.innerHTML = h.level === "component" ? `<b>${esc(h.component)}</b><span>click to select · click again for <i>${esc(h.part)}</i></span>` : `<b>${esc(h.part)}</b><span>in ${esc(h.component)} · click to select</span>`; },
+  onHover: (h) => { const el = $("#hud-hover"); if (!h || !h.component) { el.hidden = true; return; } el.hidden = false; const r = $("#viewport").getBoundingClientRect(); el.style.left = `${h.x - r.left + 14}px`; el.style.top = `${h.y - r.top + 14}px`; el.innerHTML = h.level === "component" ? `<b>${esc(h.component)}</b><span>click to select · click again for <i>${esc(h.part)}</i></span>` : `<b>${esc(h.part)}</b><span>in ${esc(h.component)} · click to select</span>`; },
 });
 const trajectory = new TrajectoryStore();
 const orchestrator = new Orchestrator({ doc, policy, optimizer, buildGeometry, log, trajectory, captureViews: () => viewport.captureViews() });
@@ -571,3 +571,5 @@ setAiMode("create");
 showDock("inspector");
 if (doc.parts.size) { viewport.frameAll(); log(`restored ${doc.components.size} component(s), ${doc.parts.size} part(s) from the last session`); }
 log("Morsy ready. Type a request in the command line below, or pick a primitive from the shelf.");
+// Dev hook (scripting the viewport from the console / demo capture).
+window.__morsy = { doc, viewport, orchestrator };
